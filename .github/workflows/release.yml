@@ -21,6 +21,10 @@ on:
         options: [claude, codex, both]
         default: both
         required: true
+      reuse_base:
+        description: Reuse the published provider base at the pinned OpenAB revision
+        type: boolean
+        default: false
 
 run-name: Release ${{ inputs.bump }} (${{ inputs.provider }})
 
@@ -83,3 +87,4 @@ jobs:
     with:
       release_tag: v${{ needs.tag.outputs.version }}
       provider: ${{ inputs.provider }}
+      reuse_base: ${{ inputs.reuse_base }}
