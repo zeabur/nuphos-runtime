@@ -61,7 +61,6 @@ run-name: Build runtime ${{ inputs.release_tag || 'main' }} (${{ inputs.provider
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: build-runtime-${{ inputs.release_tag || github.ref }}
@@ -152,6 +151,10 @@ jobs:
   build:
     needs: plan
     runs-on: ubuntu-24.04
+    # Only this job may push; the job that vets the commit cannot.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
