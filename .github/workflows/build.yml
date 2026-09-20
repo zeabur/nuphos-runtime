@@ -80,8 +80,12 @@ jobs:
       sha: ${{ steps.plan.outputs.sha }}
       sha12: ${{ steps.plan.outputs.sha12 }}
     steps:
+      # main by name, not the SHA that triggered this run: a release tags a
+      # commit this workflow's own run predates, and the check below must see
+      # the branch as it is now.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
