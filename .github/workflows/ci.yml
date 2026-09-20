@@ -37,31 +37,25 @@ jobs:
           node --test test/claude-turn-completion-smoke.mjs
 
   image:
-    name: Image builds
+    name: Toolset layer
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: true
       - name: Set up Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: Build the Codex provider base
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: third_party/openab
-          file: third_party/openab/Dockerfile.unified
-          target: codex
-          load: true
-          tags: openab-codex-base:ci
-          build-args: OPENAB_BUILD_SHA=ci
-      - name: Build the toolset layer on it
+      # The provider base is a Rust build of the openab gateway and takes far
+      # longer than everything else here. What this repository owns is the
+      # layer on top, which builds the same way on any node:22-trixie-slim
+      # base, so PR CI uses that and build.yml builds the real pair.
+      - name: Build the toolset layer
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: image
           file: image/Dockerfile
-          load: true
-          tags: nuphos-runtime-codex:ci
           build-args: |
-            BASE_IMAGE=openab-codex-base:ci
+            BASE_IMAGE=node:22-trixie-slim
             RUNTIME_PROVIDER=codex
+          cache-from: type=gha,scope=toolset-codex
+          cache-to: type=gha,mode=max,scope=toolset-codex
