@@ -1,0 +1,85 @@
+name: Release
+
+# Bumps the version on main, tags it, and publishes the images for that tag.
+#
+# Releases are on demand: the image changes rarely, and every change to it has
+# already passed CI on main by the time this runs. The bump commit is
+# version-only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump to apply
+        type: choice
+        options: [patch, minor]
+        default: patch
+        required: true
+      provider:
+        description: Runtime provider to publish
+        type: choice
+        options: [claude, codex, both]
+        default: both
+        required: true
+
+run-name: Release ${{ inputs.bump }} (${{ inputs.provider }})
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Bump the version and tag it
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          CURRENT="$(jq -r .version package.json)"
+          if [[ ! "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::package.json version is not a stable semver value: '$CURRENT'"
+            exit 1
+          fi
+          MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+          if [[ "$BUMP" == minor ]]; then
+            VERSION="${MAJOR}.$((MINOR + 1)).0"
+          else
+            VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          if git rev-parse --verify --quiet "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::tag v${VERSION} already exists"
+            exit 1
+          fi
+
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin HEAD:main "refs/tags/v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: tag
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      release_tag: v${{ needs.tag.outputs.version }}
+      provider: ${{ inputs.provider }}
