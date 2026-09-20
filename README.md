@@ -9,7 +9,7 @@ backend does not run the agent itself; it opens an ACP session against a
 runtime and streams the conversation through it. This repository builds the
 image those runtimes run.
 
-Images are published to `ghcr.io/zeabur/nuphos-openab-runtime`.
+Images are published to `ghcr.io/zeabur/nuphos-runtime`.
 
 ## What is in the image
 
@@ -129,11 +129,16 @@ manifest.
 Nuphos pins runtimes by immutable digest, never by tag:
 
 ```text
-ghcr.io/zeabur/nuphos-openab-runtime@sha256:...
+ghcr.io/zeabur/nuphos-runtime@sha256:...
 ```
 
 Publishing an image rolls nothing out. Each runtime is moved to a new digest
 deliberately.
+
+Images published before this repository existed live under the earlier package
+name `ghcr.io/zeabur/nuphos-openab-runtime`. That package is retained, read
+only, so runtimes pinned to one of its digests keep resolving; everything new
+is published here.
 
 ## Relationship to zeabur/openab
 
@@ -159,7 +164,9 @@ npm ci --ignore-scripts --prefix image/codex-acp
 node test/codex-acp-smoke.mjs image/codex-acp/node_modules/@agentclientprotocol/codex-acp/dist/index.js
 ```
 
-CI runs all of them, and builds both layers, on every pull request.
+CI runs all of them on every pull request, and builds the toolset layer. The
+provider base is a Rust build of the gateway, so it is built only when an image
+is published.
 
 ## Licence
 

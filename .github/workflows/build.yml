@@ -67,7 +67,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RUNTIME_IMAGE: ghcr.io/zeabur/nuphos-openab-runtime
+  RUNTIME_IMAGE: ghcr.io/zeabur/nuphos-runtime
 
 jobs:
   plan:
