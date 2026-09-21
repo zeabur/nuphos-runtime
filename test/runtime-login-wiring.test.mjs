@@ -38,6 +38,25 @@ test('the image bakes the ACP environment a provisioned pod has always had', () 
   assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client$/mu)
 })
 
+test('both agents run in the workspace the image creates, never one without the other', () => {
+  // openab ignores the cwd a client sends and spawns the agent in `working_dir`, which
+  // defaults to $HOME — where no skill ever lands. The two halves are coupled: a
+  // `working_dir` the image does not create fails every spawn with ENOENT, so a
+  // runtime that sets one without the other cannot start an agent at all.
+  for (const provider of ['claude-code', 'codex']) {
+    const config = readFileSync(
+      new URL(`../image/openab-config.${provider}.toml`, import.meta.url),
+      'utf8',
+    )
+
+    // The [agent] table runs until the next line that opens another table.
+    const agentTable = config.split(/^\[agent\]$/mu)[1]?.split(/^\[/mu)[0] ?? ''
+
+    assert.match(agentTable, /^working_dir = "\/workspace"$/mu, provider)
+  }
+  assert.match(dockerfile, /^RUN install -d -o node -g node -m 755 \/workspace$/mu)
+})
+
 test('the password is the only variable an operator must set', () => {
   // Neither key is baked: the auth key is the operator's secret, and the operator key
   // is derived from it at start. A baked value for either would be the same secret in

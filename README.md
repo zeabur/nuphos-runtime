@@ -132,9 +132,12 @@ nothing, so your own file replaces the default outright:
 -v ./config.toml:/etc/openab/config.toml:ro
 ```
 
-The baked default holds only what is true of the image — the agent's MCP call
-timeouts, the `BASH_ENV` guard, and for Codex the containerized
-`agent-full-access` mode. Anything sized to a particular deployment, such as
+The baked default holds only what is true of the image — the agent's working
+directory, its MCP call timeouts, the `BASH_ENV` guard, and for Codex the
+containerized `agent-full-access` mode. If you replace it, keep
+`working_dir = "/workspace"` under `[agent]`: openab ignores the directory a
+client asks for and otherwise runs the agent in `$HOME`, where the team's skills
+never land. Anything sized to a particular deployment, such as
 `[pool]` capacity or per-tool memory ceilings, is left to whoever knows the
 container's limits. The agent command itself is not pinned there: it stays on
 `OPENAB_AGENT_COMMAND`, which each variant's base image sets. See
