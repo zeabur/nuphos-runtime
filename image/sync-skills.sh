@@ -31,14 +31,39 @@ mkdir -p "$claude_dir"
 # The EXIT trap below cannot run when a caller's timeout SIGKILLs this process group,
 # and a slow backend makes that routine on a self-hosted runtime, so each killed run
 # would otherwise leave its staging tree behind for good. Sweep the ones a dead run
-# abandoned. Only by age: a sync still fetching is outside the lock and its directory
-# is live, but no run survives past curl's 120-second budget, so ten minutes cannot
-# catch one in flight.
-find "$claude_dir" -maxdepth 1 -type d -name '.skills-sync.*' -mmin +10 \
-  -exec rm -rf {} + 2>/dev/null || true
+# abandoned.
+#
+# Liveness is not inferred from age. A run can wait on the sync lock for as long as
+# another holds it, and the provisioner calls this without any parent timeout, so no
+# age is old enough to prove a run is gone. Instead every run holds an exclusive lock
+# on its own `.owner` for its whole life, and the kernel releases that lock when the
+# descriptor closes — including on SIGKILL. A tree whose `.owner` can be locked has no
+# living owner. The one-minute guard only covers the instant between a run creating
+# its directory and locking `.owner` in it.
+sweep_abandoned() {
+  local dir
+  for dir in "$claude_dir"/.skills-sync.*; do
+    [[ -d $dir ]] || continue
+    if command -v flock >/dev/null 2>&1; then
+      [[ -n $(find "$dir" -maxdepth 0 -mmin +1 2>/dev/null) ]] || continue
+      if [[ -e $dir/.owner ]] && ! flock -n "$dir/.owner" true 2>/dev/null; then
+        continue
+      fi
+    else
+      # Without flock there is no liveness to ask, so fall back to age alone.
+      [[ -n $(find "$dir" -maxdepth 0 -mmin +10 2>/dev/null) ]] || continue
+    fi
+    rm -rf "$dir"
+  done
+}
+sweep_abandoned
 
 tmp_dir=$(mktemp -d "$claude_dir/.skills-sync.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$tmp_dir/.owner"
+  flock 8
+fi
 bundle="$tmp_dir/bundle.json"
 curl_config="$tmp_dir/curl.conf"
 staging="$tmp_dir/skills"
@@ -91,7 +116,13 @@ revision=$(jq -er '.revision' "$bundle")
 # A kernel lock is released when the descriptor closes, however the process died.
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$claude_dir/.skills-sync.lock"
-  flock 9
+  # Bounded, so one wedged holder cannot stall every later sync behind it. Giving up
+  # is safe: this run's own `.owner` lock keeps its tree from being swept while it
+  # waits, and the next session or reconcile simply tries again.
+  if ! flock -w "${NUPHOS_SKILLS_LOCK_WAIT_SECONDS:-120}" 9; then
+    printf 'another skills sync held the lock too long; giving up this run\n' >&2
+    exit 1
+  fi
 fi
 
 # Re-read under the lock: a sync that finished while this one was waiting may have

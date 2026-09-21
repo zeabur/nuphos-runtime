@@ -260,6 +260,107 @@ test('staging trees abandoned by a killed run are swept, and a live one is not',
   }
 })
 
+const flockBinary = ['/usr/bin/flock', '/opt/homebrew/bin/flock'].find((path) => existsSync(path))
+
+/** Hold the sync lock from outside, the way a run in its critical section would. */
+function holdSyncLock(claude, seconds) {
+  const holder = spawn(flockBinary, [join(claude, '.skills-sync.lock'), 'sleep', String(seconds)], {
+    stdio: 'ignore',
+  })
+
+  return { release: () => holder.kill('SIGKILL'), exited: new Promise((r) => holder.once('exit', r)) }
+}
+
+async function waitFor(predicate, timeoutMs = 10_000) {
+  const started = Date.now()
+
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) throw new Error('condition never became true')
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
+test('a run waiting on the lock keeps its staging tree however long it waits', async (t) => {
+  if (!flockBinary) {
+    t.skip('flock is unavailable; the image ships util-linux and CI runs Linux')
+
+    return
+  }
+  // The scenario that age-based sweeping got wrong: a run fetches, creates its staging
+  // tree, then waits on the sync lock. The provisioner calls this with no parent
+  // timeout, so that wait has no bound an age could exceed. A second run arriving
+  // meanwhile must not mistake the waiter's tree for an abandoned one.
+  const server = await serveBundles(() => ({
+    revision: 'rev-wait',
+    files: [{ path: 'kept/SKILL.md', contentBase64: encode('# Waited'), executable: false }],
+  }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+
+    mkdirSync(claude, { recursive: true })
+    const lock = holdSyncLock(claude, 60)
+    const staging = () => readdirSync(claude).filter((entry) => entry.startsWith('.skills-sync.') && entry !== '.skills-sync.lock')
+
+    const waiter = sync(env)
+
+    await waitFor(() => staging().length === 1)
+    const waiterTree = join(claude, staging()[0])
+
+    // Make it look as abandoned as any age heuristic could ask.
+    const hourAgo = new Date(Date.now() - 60 * 60_000)
+
+    utimesSync(waiterTree, hourAgo, hourAgo)
+
+    // A second run sweeps on its way in. It then queues behind the same lock and gives
+    // up quickly, which is fine; what matters is what its sweep did.
+    const sweeper = await sync({ ...env, NUPHOS_SKILLS_LOCK_WAIT_SECONDS: '1' })
+
+    assert.equal(sweeper.code, 1)
+    assert.equal(existsSync(waiterTree), true, 'a live waiter lost its staging tree')
+
+    lock.release()
+    await lock.exited
+    assert.deepEqual(await waiter, { code: 0, stderr: '' })
+    assert.equal(readFileSync(join(claude, 'skills/kept/SKILL.md'), 'utf8'), '# Waited')
+  } finally {
+    await server.close()
+  }
+})
+
+test('a run gives up rather than wait forever behind a wedged holder', async (t) => {
+  if (!flockBinary) {
+    t.skip('flock is unavailable; the image ships util-linux and CI runs Linux')
+
+    return
+  }
+  const server = await serveBundles(() => ({ revision: 'rev-1', files: [] }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+
+    mkdirSync(claude, { recursive: true })
+    const lock = holdSyncLock(claude, 60)
+    const started = Date.now()
+    const { code, stderr } = await sync({ ...env, NUPHOS_SKILLS_LOCK_WAIT_SECONDS: '1' })
+
+    assert.equal(code, 1)
+    assert.match(stderr, /held the lock too long/u)
+    assert.ok(Date.now() - started < 15_000)
+    // A normal exit still runs the trap, so giving up leaves nothing behind.
+    assert.deepEqual(
+      readdirSync(claude).filter((entry) => entry.startsWith('.skills-sync.') && entry !== '.skills-sync.lock'),
+      [],
+    )
+    lock.release()
+    await lock.exited
+  } finally {
+    await server.close()
+  }
+})
+
 test('a workspace with no skills yet installs an empty tree rather than failing', async () => {
   // `jq -e` exits 4 when its filter yields nothing, so an empty `files` array used to
   // fail the whole sync under `set -e` — on provisioned pods too, not just here.
