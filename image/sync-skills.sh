@@ -27,6 +27,16 @@ umask 077
 runtime_workspace=${NUPHOS_RUNTIME_WORKSPACE:-/workspace}
 claude_dir="$runtime_workspace/.claude"
 mkdir -p "$claude_dir"
+
+# The EXIT trap below cannot run when a caller's timeout SIGKILLs this process group,
+# and a slow backend makes that routine on a self-hosted runtime, so each killed run
+# would otherwise leave its staging tree behind for good. Sweep the ones a dead run
+# abandoned. Only by age: a sync still fetching is outside the lock and its directory
+# is live, but no run survives past curl's 120-second budget, so ten minutes cannot
+# catch one in flight.
+find "$claude_dir" -maxdepth 1 -type d -name '.skills-sync.*' -mmin +10 \
+  -exec rm -rf {} + 2>/dev/null || true
+
 tmp_dir=$(mktemp -d "$claude_dir/.skills-sync.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 bundle="$tmp_dir/bundle.json"

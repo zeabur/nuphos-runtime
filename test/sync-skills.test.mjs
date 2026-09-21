@@ -3,11 +3,14 @@ import { spawn } from 'node:child_process'
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
   statSync,
+  utimesSync,
+  writeFileSync,
 } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -222,6 +225,36 @@ test('a backend that ignores the entity tag still installs the bundle', async ()
     assert.deepEqual(await sync(env), { code: 0, stderr: '' })
     assert.equal(readFileSync(join(claude, 'skills/kept/SKILL.md'), 'utf8'), '# Two')
     assert.equal(readFileSync(join(claude, '.skills-revision'), 'utf8'), 'rev-2')
+  } finally {
+    await server.close()
+  }
+})
+
+test('staging trees abandoned by a killed run are swept, and a live one is not', async () => {
+  // A caller's timeout SIGKILLs the process group, which skips the EXIT trap, so a
+  // run that died mid-fetch leaves its `.skills-sync.*` tree behind. Without a sweep
+  // a self-hosted runtime behind a slow backend would accumulate them forever.
+  const server = await serveBundles(() => ({ revision: 'rev-1', files: [] }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+    const abandoned = join(claude, '.skills-sync.dead01')
+    const inFlight = join(claude, '.skills-sync.live01')
+
+    mkdirSync(join(abandoned, 'skills'), { recursive: true })
+    writeFileSync(join(abandoned, 'bundle.json'), 'partial')
+    mkdirSync(inFlight, { recursive: true })
+    // Older than any run could live — curl alone gives up after two minutes.
+    const hourAgo = new Date(Date.now() - 60 * 60_000)
+
+    utimesSync(abandoned, hourAgo, hourAgo)
+
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.equal(existsSync(abandoned), false)
+    // A sync still fetching sits outside the lock with a fresh directory; sweeping it
+    // would pull the staging tree out from under a run that is about to install.
+    assert.equal(existsSync(inFlight), true)
   } finally {
     await server.close()
   }
