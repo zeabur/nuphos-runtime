@@ -42,7 +42,7 @@ until someone re-reviews the patch.
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
 | `/opt/nuphos-runtime/runtime-guard.sh` | Sourced via `BASH_ENV`; refreshes per-turn credentials into the shell environment and sets a memory ceiling |
 | `/opt/nuphos-runtime/codex-login.mjs` | Drives Codex's device-code login in an isolated `CODEX_HOME` |
-| `/usr/local/bin/nuphos-sync-skills` | Fetches the workspace's skill bundle at startup and swaps it in atomically |
+| `/usr/local/bin/nuphos-sync-skills` | Fetches the workspace's skill bundle and swaps it in atomically — pushed by the provisioner for a managed pod, run per session by `runtime-defaults.mjs` for a self-hosted one |
 | `/usr/local/bin/nuphos-seed-codex-auth` | Seeds Codex credentials from a mounted secret, once per credential revision |
 
 Both adapter directories are ahead of the base image's globally installed
@@ -98,7 +98,7 @@ ACP session.
 docker run -d --name nuphos-runtime -p 8080:8080 \
   -e OPENAB_ACP_ENABLED=true \
   -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
-  ghcr.io/zeabur/nuphos-runtime:0.0.4-claude-code
+  ghcr.io/zeabur/nuphos-runtime:0.0.6-claude-code
 ```
 
 ACP is then served at `ws://<host>:8080/acp`. The key travels as
@@ -146,16 +146,28 @@ address and that same password. Two things the backend insists on:
 - **The password must be at least 32 characters.** `openssl rand -hex 32`
   clears that with room to spare.
 
-For the agent to reach Nuphos' own tools, the container also needs
-`OPENAB_ACP_MCP_SERVERS=true`, and it must be able to resolve and reach the
-backend the tools are served from. `OPENAB_ACP_CONTROL_KEY` is optional: a
-runtime without one holds conversations perfectly well, but the operator
-channel — live status, pending decisions, steering, and the Codex sign-in
-below — stays dark.
+From 0.0.6 the image carries the ACP environment a Nuphos-provisioned pod has
+always had, so nothing else has to be set for the agent to reach Nuphos' own
+tools — the container only has to be able to resolve and reach the backend they
+are served from. On 0.0.5 and earlier you must supply
+`OPENAB_ACP_MCP_SERVERS=true` and `GATEWAY_ALLOWED_USERS=acp_client` yourself;
+without the first the agent gets no Nuphos tools, and without the second the
+runtime accepts a session and then refuses its first prompt.
 
-Two things a self-hosted runtime does not get yet: the team's skill bundle,
-which is delivered only to runtimes Nuphos provisions, and the `/workspace`
-layout a managed pod is built with. Both are on the way.
+`GATEWAY_ALLOWED_USERS` is the gateway-wide trusted-sender list, not an ACP
+switch. If you also enable Discord, Slack or LINE on the same container, **add**
+their sender ids to it rather than dropping the baked value, or those platforms
+are denied instead.
+
+`OPENAB_ACP_CONTROL_KEY` is optional: a runtime without one holds conversations
+perfectly well, but the operator channel — live status, pending decisions,
+steering, and the Codex sign-in below — stays dark.
+
+Two things a self-hosted runtime does not get yet: the team's skill bundle and
+the `/workspace` layout a managed pod is built with. From 0.0.6 the image will
+fetch the bundle itself for any session whose environment carries a bundle URL
+and token, but nothing issues those yet — until the backend does, a self-hosted
+runtime still runs without the team's skills.
 
 Deleting a runtime from Settings does not revoke its password. Change the key
 on the container first, then rotate it in Settings.
@@ -165,7 +177,7 @@ on the container first, then rotate it in Settings.
 Once the runtime is registered, the app can run Codex's device flow inside the
 container and show you the code, instead of you finding a shell on the host.
 
-This needs a **Codex image of 0.0.5 or newer** — earlier ones carry no sign-in
+This needs a **Codex image of 0.0.6 or newer** — earlier ones carry no sign-in
 command and report no account, so the app offers nothing. It also needs
 `OPENAB_ACP_CONTROL_KEY`, which is what the operator channel above is for: set
 it, and register it alongside the address and the password.
@@ -176,7 +188,7 @@ docker run -d --name nuphos-runtime -p 8080:8080 \
   -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
   -e OPENAB_ACP_CONTROL_KEY="$(openssl rand -hex 32)" \
   -v nuphos-codex-home:/home/node \
-  ghcr.io/zeabur/nuphos-runtime:0.0.5-codex
+  ghcr.io/zeabur/nuphos-runtime:0.0.6-codex
 ```
 
 Then **Settings → Agent → Sign in** on the runtime's card. The credential the

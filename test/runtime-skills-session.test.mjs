@@ -1,0 +1,132 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm, writeFile, chmod } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+
+import { nuphosSyncRuntimeSkills, patchRuntimeDefaults } from '../image/runtime-defaults.mjs'
+
+/** Stand in for /usr/local/bin/nuphos-sync-skills by recording what it was handed. */
+async function withFakeScript(body, run) {
+  const directory = await mkdtemp(join(tmpdir(), 'nuphos-skills-test-'))
+  const script = join(directory, 'nuphos-sync-skills')
+  const record = join(directory, 'record.json')
+
+  await writeFile(script, `#!/bin/sh\n${body}\n`)
+  await chmod(script, 0o755)
+  try {
+    return await run({ directory, script, record })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+const meta = (env, provider = 'claudeCode') =>
+  provider === 'claudeCode'
+    ? { _meta: { claudeCode: { options: { env } } } }
+    : { _meta: { 'ai.nuphos/codex': { env } } }
+
+test('a session carrying a bundle credential syncs, and one without it does not', async () => {
+  await withFakeScript('printenv > "$NUPHOS_TEST_RECORD"', async ({ record, script }) => {
+    const sync = (params) =>
+      nuphosSyncRuntimeSkills(params, { script, env: { NUPHOS_TEST_RECORD: record } })
+
+    // Managed pods carry neither variable and must not be touched at all.
+    assert.equal(await sync({}), false)
+    assert.equal(await sync(meta({})), false)
+    assert.equal(await sync(meta({ NUPHOS_RUNTIME_SKILLS_URL: 'https://x' })), false)
+    assert.equal(await sync(meta({ NUPHOS_RUNTIME_SKILLS_TOKEN: 't' })), false)
+    await assert.rejects(readFile(record), { code: 'ENOENT' })
+
+    assert.equal(
+      await sync(
+        meta({ NUPHOS_RUNTIME_SKILLS_URL: 'https://bundle', NUPHOS_RUNTIME_SKILLS_TOKEN: 'tok' }),
+      ),
+      true,
+    )
+    const env = await readFile(record, 'utf8')
+
+    assert.match(env, /^NUPHOS_RUNTIME_SKILLS_URL=https:\/\/bundle$/mu)
+    assert.match(env, /^NUPHOS_RUNTIME_SKILLS_TOKEN=tok$/mu)
+    // The bundle credential is all the script needs; the agent's own account and the
+    // runtime's transport keys must not ride along.
+    assert.deepEqual(
+      env
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(0, line.indexOf('=')))
+        // `sh` sets these three itself; everything else present would be inherited.
+        .filter((name) => !['PWD', 'SHLVL', '_'].includes(name))
+        .filter((name) => !name.startsWith('NUPHOS_TEST'))
+        .sort(),
+      ['HOME', 'NUPHOS_RUNTIME_SKILLS_TOKEN', 'NUPHOS_RUNTIME_SKILLS_URL', 'PATH'],
+    )
+  })
+})
+
+test('the Codex session shape is read too', async () => {
+  await withFakeScript('printenv > "$NUPHOS_TEST_RECORD"', async ({ record, script }) => {
+    assert.equal(
+      await nuphosSyncRuntimeSkills(
+        meta(
+          { NUPHOS_RUNTIME_SKILLS_URL: 'https://codex', NUPHOS_RUNTIME_SKILLS_TOKEN: 'ct' },
+          'codex',
+        ),
+        { script, env: { NUPHOS_TEST_RECORD: record } },
+      ),
+      true,
+    )
+    assert.match(await readFile(record, 'utf8'), /^NUPHOS_RUNTIME_SKILLS_URL=https:\/\/codex$/mu)
+  })
+})
+
+test('a failing or hanging sync never stops the conversation', async () => {
+  const carrying = meta({
+    NUPHOS_RUNTIME_SKILLS_URL: 'https://bundle',
+    NUPHOS_RUNTIME_SKILLS_TOKEN: 'tok',
+  })
+
+  await withFakeScript('exit 7', async ({ script }) => {
+    assert.equal(await nuphosSyncRuntimeSkills(carrying, { script }), false)
+  })
+  // The script allows itself two minutes; session/new must not wait that long. The
+  // fetch is a child of the script, so the whole group has to go.
+  await withFakeScript('sleep 120 & wait', async ({ script }) => {
+    const started = Date.now()
+
+    assert.equal(await nuphosSyncRuntimeSkills(carrying, { script, timeoutMs: 300 }), false)
+    assert.ok(Date.now() - started < 10_000)
+  })
+  // A missing script is the ordinary case on an image that ships no sync at all.
+  assert.equal(
+    await nuphosSyncRuntimeSkills(carrying, { script: '/nonexistent/nuphos-sync-skills' }),
+    false,
+  )
+})
+
+test('the sync rides the one session/new patch and still applies defaults', async () => {
+  const source = `#!/usr/bin/env node
+class Agent {
+    async newSession(params) { return { sessionId: params.id, configOptions: [{ id: 'model', currentValue: 'a', options: [{ value: 'a' }, { value: 'b' }] }] }; }
+    async setSessionConfigOption(params) { return { configOptions: [{ id: 'model', currentValue: params.value, options: [{ value: 'a' }, { value: 'b' }] }] }; }
+    async loadSession() { return 'loaded without syncing'; }
+  }`
+  const patched = `${patchRuntimeDefaults(source)}\nexport { Agent }`
+
+  // Both helpers must be serialized into the adapter, or the patched handler throws
+  // at the first session instead of syncing.
+  assert.ok(patched.includes('async function nuphosSyncRuntimeSkills'))
+  assert.ok(patched.includes('await nuphosSyncRuntimeSkills(params);'))
+  assert.equal(patched.split('async newSession(params) {').length, 2)
+
+  const module = await import(`data:text/javascript,${encodeURIComponent(patched)}`)
+  const agent = new module.Agent()
+  const session = await agent.newSession({
+    id: 'a',
+    _meta: { 'ai.nuphos/runtimeDefaults': { model: 'b' } },
+  })
+
+  // No credential in this session, so the sync is a no-op and defaults still applied.
+  assert.equal(session.configOptions[0].currentValue, 'b')
+  assert.equal(await agent.loadSession({}), 'loaded without syncing')
+})
