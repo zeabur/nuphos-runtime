@@ -66,6 +66,16 @@ RUN if [ "${RUNTIME_PROVIDER}" = codex ]; then \
 
 ENV PATH="/opt/nuphos-codex-acp/node_modules/.bin:/opt/nuphos-claude-agent-acp/node_modules/.bin:${PATH}"
 
+# What `_openab/runtime/login` runs, and where the credential it produces lands. Both are
+# empty unless the build supplies them, because only Codex keeps its credential in a file:
+# a Claude Code account arrives with the session, so this image must report "cannot tell"
+# rather than "signed out" for it. Dockerfile `ENV` cannot branch on `RUNTIME_PROVIDER`,
+# so the caller selects the values — see the README for the Codex pair.
+ARG RUNTIME_LOGIN_COMMAND
+ARG RUNTIME_AUTH_FILE
+ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
+    OPENAB_RUNTIME_AUTH_FILE="${RUNTIME_AUTH_FILE}"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg jq unzip \
         bash coreutils util-linux procps acct \

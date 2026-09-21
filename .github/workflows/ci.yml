@@ -57,5 +57,7 @@ jobs:
           build-args: |
             BASE_IMAGE=node:22-trixie-slim
             RUNTIME_PROVIDER=codex
+            RUNTIME_LOGIN_COMMAND=node /opt/nuphos-runtime/codex-login.mjs --install
+            RUNTIME_AUTH_FILE=/home/node/.codex/auth.json
           cache-from: type=gha,scope=toolset-codex
           cache-to: type=gha,mode=max,scope=toolset-codex

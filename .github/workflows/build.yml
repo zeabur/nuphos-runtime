@@ -180,9 +180,20 @@ jobs:
           set -euo pipefail
           # The published variant name matches the backend's provider identifier.
           if [[ "$PROVIDER" == "codex" ]]; then VARIANT=codex; else VARIANT=claude-code; fi
+          # Only Codex has a device sign-in and a credential file; a Claude Code account
+          # arrives with the session, so its image leaves both unset on purpose.
+          if [[ "$VARIANT" == "codex" ]]; then
+            LOGIN_COMMAND='node /opt/nuphos-runtime/codex-login.mjs --install'
+            AUTH_FILE='/home/node/.codex/auth.json'
+          else
+            LOGIN_COMMAND=''
+            AUTH_FILE=''
+          fi
 
           {
             echo "variant=${VARIANT}"
+            echo "login_command=${LOGIN_COMMAND}"
+            echo "auth_file=${AUTH_FILE}"
             # The toolset build resolves its base through this tag, so the base
             # must be pushed before it runs.
             echo "base=${RUNTIME_IMAGE}:${SHA12}-base-${VARIANT}"
@@ -230,6 +241,8 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ steps.tags.outputs.base }}
             RUNTIME_PROVIDER=${{ steps.tags.outputs.variant }}
+            RUNTIME_LOGIN_COMMAND=${{ steps.tags.outputs.login_command }}
+            RUNTIME_AUTH_FILE=${{ steps.tags.outputs.auth_file }}
           tags: ${{ steps.tags.outputs.runtime_tags }}
           labels: |
             org.opencontainers.image.revision=${{ needs.plan.outputs.sha }}
