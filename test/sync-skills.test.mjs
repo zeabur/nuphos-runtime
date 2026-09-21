@@ -163,6 +163,70 @@ test('leaves the live tree untouched when the bundle has not changed', async () 
   }
 })
 
+test('an unchanged bundle is settled by a conditional request, not a whole body', async () => {
+  const seen = []
+  const bundle = {
+    revision: 'rev-1',
+    files: [{ path: 'kept/SKILL.md', contentBase64: encode('# One'), executable: false }],
+  }
+  // A backend that understands the entity tag answers 304 with no body at all.
+  // The script has to treat that as success and stop before parsing — `jq` on an
+  // empty file would fail it, and provisioned pods run this same script.
+  const server = createServer((request, response) => {
+    request.resume()
+    seen.push(request.headers['if-none-match'])
+    if (request.headers['if-none-match'] === `"${bundle.revision}"`) {
+      response.writeHead(304)
+      response.end()
+
+      return
+    }
+    response.writeHead(200, { 'content-type': 'application/json', etag: `"${bundle.revision}"` })
+    response.end(JSON.stringify(bundle))
+  })
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const env = workspaceEnv(`http://127.0.0.1:${server.address().port}/skills`)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+
+    // Nothing installed yet, so there is no tag to offer and the body must arrive.
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.deepEqual(seen, [undefined])
+    const installed = readlinkSync(join(claude, 'skills'))
+
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.deepEqual(seen, [undefined, '"rev-1"'])
+    // The 304 left the live tree exactly as it was.
+    assert.equal(readlinkSync(join(claude, 'skills')), installed)
+    assert.equal(readFileSync(join(claude, 'skills/kept/SKILL.md'), 'utf8'), '# One')
+    assert.equal(readFileSync(join(claude, '.skills-revision'), 'utf8'), 'rev-1')
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('a backend that ignores the entity tag still installs the bundle', async () => {
+  // The image ships ahead of the backend that answers 304, so an older backend
+  // returning a full 200 to a conditional request must still work.
+  const server = await serveBundles(() => ({
+    revision: 'rev-2',
+    files: [{ path: 'kept/SKILL.md', contentBase64: encode('# Two'), executable: false }],
+  }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.equal(readFileSync(join(claude, 'skills/kept/SKILL.md'), 'utf8'), '# Two')
+    assert.equal(readFileSync(join(claude, '.skills-revision'), 'utf8'), 'rev-2')
+  } finally {
+    await server.close()
+  }
+})
+
 test('swaps a new bundle in without ever exposing a missing tree', async () => {
   const bundles = [
     {

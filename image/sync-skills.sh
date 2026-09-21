@@ -14,19 +14,34 @@ bundle="$tmp_dir/bundle.json"
 curl_config="$tmp_dir/curl.conf"
 staging="$tmp_dir/skills"
 mkdir "$staging"
+revision_file="$claude_dir/.skills-revision"
 
+# A self-hosted runtime runs this on every new session, so the steady state — the
+# bundle on disk is already the current one — should not pay for the whole body.
+# Offer the installed revision as the entity tag; a backend that understands it
+# answers 304 with no body, and one that does not simply sends the bundle.
 {
   printf 'silent\nshow-error\nfail-with-body\nconnect-timeout = 10\nmax-time = 120\n'
   printf 'url = "%s"\n' "$NUPHOS_RUNTIME_SKILLS_URL"
   printf 'header = "Authorization: Bearer %s"\n' "$NUPHOS_RUNTIME_SKILLS_TOKEN"
+  if [[ -d $claude_dir/skills && -r $revision_file ]]; then
+    printf 'header = "If-None-Match: \\"%s\\""\n' "$(cat "$revision_file")"
+  fi
   printf 'output = "%s"\n' "$bundle"
+  printf 'write-out = "%%{http_code}"\n'
 } >"$curl_config"
 chmod 600 "$curl_config"
-curl --config "$curl_config"
+status=$(curl --config "$curl_config")
+
+# 304 is a success with an empty body, so it must return before the body is
+# parsed — `jq` on nothing would fail the script under `set -e`, and this script
+# also runs on provisioned pods.
+if [[ $status == 304 ]]; then
+  exit 0
+fi
 
 jq -e '.revision | type == "string"' "$bundle" >/dev/null
 revision=$(jq -er '.revision' "$bundle")
-revision_file="$claude_dir/.skills-revision"
 
 # The provisioner re-runs this on every reconcile of a live runtime, so the
 # usual outcome is that the bundle already on disk is the one being fetched.
