@@ -30,14 +30,29 @@ test('the published Codex image carries both values and the Claude Code image ca
 test('the image bakes the ACP environment a provisioned pod has always had', () => {
   // A self-hosted container reaching these by hand was the difference between a
   // runtime that chats with tools and one that accepts a session and then refuses
-  // its first prompt. openab reads all three only as environment, so config.toml
+  // its first prompt. openab reads all four only as environment, so config.toml
   // cannot carry them.
-  assert.match(dockerfile, /^ENV OPENAB_ACP_MCP_SERVERS=true \\$/mu)
+  assert.match(dockerfile, /^ENV OPENAB_ACP_ENABLED=true \\$/mu)
+  assert.match(dockerfile, /^ {4}OPENAB_ACP_MCP_SERVERS=true \\$/mu)
   assert.match(dockerfile, /^ {4}OPENAB_ACP_STREAMING=true \\$/mu)
   assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client$/mu)
-  // The operator's own switch for exposing /acp stays the operator's.
-  assert.doesNotMatch(dockerfile, /ENV[^\n]*OPENAB_ACP_ENABLED/u)
-  assert.doesNotMatch(dockerfile, /^ {4}OPENAB_ACP_ENABLED/mu)
+})
+
+test('the password is the only variable an operator must set', () => {
+  // Neither key is baked: the auth key is the operator's secret, and the operator key
+  // is derived from it at start. A baked value for either would be the same secret in
+  // every container.
+  assert.doesNotMatch(dockerfile, /OPENAB_ACP_AUTH_KEY=/u)
+  assert.doesNotMatch(dockerfile, /OPENAB_ACP_CONTROL_KEY=/u)
+  // The derivation runs whatever command replaces the default, so it is part of the
+  // entrypoint, with tini kept as PID 1 for signals and reaping.
+  assert.match(
+    dockerfile,
+    /^ENTRYPOINT \["tini", "--", "\/usr\/local\/bin\/nuphos-runtime-start"\]$/mu,
+  )
+  assert.match(dockerfile, /^CMD \["openab", "run", "-c", "\/etc\/openab\/config\.toml"\]$/mu)
+  // Nothing mounted means nothing at /workspace, and `node` cannot create it there.
+  assert.match(dockerfile, /^RUN install -d -o node -g node -m 755 \/workspace$/mu)
 })
 
 test('the sign-in command names the flag that keeps the credential in the container', () => {

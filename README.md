@@ -17,8 +17,8 @@ Three things, in layers:
 
 1. **The OpenAB gateway.** [`openab`](https://github.com/openabdev/openab) is
    the process that owns the container: it accepts ACP over the network,
-   supervises the agent, and keeps sessions alive across agent restarts. It is
-   the image's entrypoint.
+   supervises the agent, and keeps sessions alive across agent restarts. A
+   short start script prepares the container and then becomes openab.
 2. **The agent CLI and its ACP adapter.** For `claude-code`, that is
    `@anthropic-ai/claude-code` with `@agentclientprotocol/claude-agent-acp`;
    for `codex`, `@openai/codex` with `@agentclientprotocol/codex-acp`. The
@@ -37,7 +37,8 @@ until someone re-reviews the patch.
 | --- | --- |
 | `/opt/nuphos-claude-agent-acp` | Claude adapter (0.74.0, Agent SDK 0.3.261), patched to publish session state and to bridge HTTP MCP servers |
 | `/opt/nuphos-codex-acp` | Codex adapter (1.1.4, Codex CLI 0.153.4), patched for per-session instructions and environment, MCP bridging, and steering an active turn |
-| `/etc/openab/config.toml` | The gateway config the entrypoint reads, so the container starts with nothing mounted; a mount at this path replaces it |
+| `/usr/local/bin/nuphos-runtime-start` | The entrypoint: derives the operator key from the password when none is set, lays out `/workspace` the way a provisioned pod does, then becomes openab |
+| `/etc/openab/config.toml` | The gateway config openab reads, so the container starts with nothing mounted; a mount at this path replaces it |
 | `/opt/runtime-defaults.mjs` | Applies a model, reasoning effort and fast-mode default to a new session |
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
 | `/opt/nuphos-runtime/runtime-guard.sh` | Sourced via `BASH_ENV`; refreshes per-turn credentials into the shell environment and sets a memory ceiling |
@@ -91,21 +92,37 @@ only reaches users through a rebuild of both.
 
 ## Running one
 
-Starting a runtime takes one secret: the password a client presents to open an
-ACP session.
+A runtime takes one variable: an admin password. Nothing else has to be set.
 
 ```sh
 docker run -d --name nuphos-runtime -p 8080:8080 \
-  -e OPENAB_ACP_ENABLED=true \
   -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
-  ghcr.io/zeabur/nuphos-runtime:0.0.6-claude-code
+  -v nuphos-runtime-home:/home/node \
+  ghcr.io/zeabur/nuphos-runtime:0.0.7-codex
 ```
 
-ACP is then served at `ws://<host>:8080/acp`. The key travels as
-`Authorization: Bearer <key>` or as the `openab.bearer.<key>` WebSocket
-subprotocol; an upgrade without it is refused with `401`. Setting it is not
-optional on a routable address — openab declines to mount `/acp` at all when a
-non-loopback bind has no key, rather than expose an unauthenticated agent.
+Use `0.0.7-claude-code` for a Claude Code runtime. Keep the password: you paste it
+into Nuphos when you connect the runtime. It must be at least 32 characters, using
+only letters, digits and ``! # $ % & ' * + - . ^ _ ` | ~`` — it travels in a
+WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot. `openssl rand -hex 32`
+always qualifies.
+
+The volume is optional but recommended. It keeps whatever the runtime holds
+across container replacement — for Codex, the account it signs in with.
+
+ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
+**`wss://`** — put TLS in front of the port. Most hosts terminate TLS for you
+(Zeabur, for one, gives every service an HTTPS domain), so this is usually
+nothing more than using the address they hand you; on a bare VPS, a reverse
+proxy such as Caddy does it in one line.
+
+The password is the only thing standing in front of an agent that holds your
+workspace's cloud credentials, so openab will not serve `/acp` on a routable
+address without it, and refuses any upgrade that does not present it (`401`).
+Everything else ACP needs is already set in the image. The operator credential
+openab uses for runtime-wide status and sign-in is derived from the same
+password, by the runtime and by Nuphos alike, so there is no second secret to
+set or paste. To turn ACP off entirely, set `OPENAB_ACP_ENABLED=false`.
 
 The image ships a default `/etc/openab/config.toml`, so nothing has to be
 mounted for the container to start. openab reads that one path and merges
@@ -135,82 +152,66 @@ Codex credentials land in `$HOME/.codex`, which is lost when the container is
 replaced; mount a volume at `/home/node` to keep them. A Claude Code runtime
 needs no volume, because it holds no credential of its own.
 
-### Registering it with Nuphos
+### Connecting it to Nuphos
 
-A workspace administrator adds the runtime in **Settings → Agent** with its
-address and that same password. Two things the backend insists on:
+A workspace administrator opens **Settings → Agent → Connect your own** and pastes
+two things: the runtime's `wss://` address and the password it was started with.
+That is the whole binding. Plain `ws://` is accepted only for an in-cluster `*.svc`
+host; anything reached over the internet has to be `wss://`.
 
-- **The address must be `wss://`.** Plain `ws://` is accepted only for an
-  in-cluster `*.svc` host, so a runtime on a VPS needs TLS terminated in front
-  of it.
-- **The password must be at least 32 characters.** `openssl rand -hex 32`
-  clears that with room to spare.
+Everything else a Nuphos-provisioned pod has always had is already in the image,
+so the agent reaches Nuphos' own tools as soon as it is connected — the container
+only has to be able to resolve and reach the backend they are served from. The
+team's skills arrive the same way: for a runtime it did not provision, the backend
+hands each session a short-lived bundle address, and the runtime fetches the bundle
+itself.
 
-From 0.0.6 the image carries the ACP environment a Nuphos-provisioned pod has
-always had, so nothing else has to be set for the agent to reach Nuphos' own
-tools — the container only has to be able to resolve and reach the backend they
-are served from. On 0.0.5 and earlier you must supply
-`OPENAB_ACP_MCP_SERVERS=true` and `GATEWAY_ALLOWED_USERS=acp_client` yourself;
-without the first the agent gets no Nuphos tools, and without the second the
-runtime accepts a session and then refuses its first prompt.
-
-`GATEWAY_ALLOWED_USERS` is the gateway-wide trusted-sender list, not an ACP
+`GATEWAY_ALLOWED_USERS` is baked as the gateway-wide trusted-sender list, not an ACP
 switch. If you also enable Discord, Slack or LINE on the same container, **add**
-their sender ids to it rather than dropping the baked value, or those platforms
+their sender ids to it rather than replacing the baked value, or those platforms
 are denied instead.
 
-`OPENAB_ACP_CONTROL_KEY` is optional: a runtime without one holds conversations
-perfectly well, but the operator channel — live status, pending decisions,
-steering, and the Codex sign-in below — stays dark.
+To rotate the password, change it on the container and then in the runtime's
+settings. Removing a runtime from Nuphos does not revoke its password.
 
-From 0.0.6 the runtime fetches the team's skill bundle itself, for any session
-whose environment carries a bundle URL and token — the backend issues those only
-for a runtime it did not provision, since it pushes the bundle straight into one
-it did. A workspace on a backend that issues neither runs without the team's
-skills; that is the only thing missing, and it costs nothing when there is no
-bundle to fetch.
+#### Separate operator key
 
-The `/workspace` layout a managed pod is built with is still not reproduced
-here.
+The operator credential is derived from the password unless you set
+`OPENAB_ACP_CONTROL_KEY` yourself, in which case the runtime uses yours. Only a
+Nuphos-provisioned pod needs that: the provisioner issues both keys from its own
+Secret. A self-hosted runtime gains nothing from a second value — anyone holding
+the password can already run code in the container through the agent.
 
-Deleting a runtime from Settings does not revoke its password. Change the key
-on the container first, then rotate it in Settings.
+#### Upgrading from 0.0.6 or earlier
+
+Those images need more than the password. 0.0.5 and earlier carry none of the ACP
+environment, so without `OPENAB_ACP_MCP_SERVERS=true` the agent gets no Nuphos
+tools, and without `GATEWAY_ALLOWED_USERS=acp_client` the runtime accepts a session
+and then refuses its first prompt. Before 0.0.7 none of them derive the operator
+key, so a runtime connected with only its password gets no status and no Codex
+sign-in, and none create `/workspace`, so skills never land. Moving to 0.0.7 needs
+no change to how the runtime is connected.
 
 ### Signing Codex in from the app
 
-Once the runtime is registered, the app can run Codex's device flow inside the
-container and show you the code, instead of you finding a shell on the host.
+Once a Codex runtime is connected, press **Sign in** on its card. The app runs
+Codex's device flow inside the container and shows you the code, instead of you
+finding a shell on the host. The credential the flow mints stays in the container:
+only the device code and the verification link cross the wire, and the runtime
+reports afterwards whether it holds a credential, so the card stops asking. Keep
+the `/home/node` volume from the quick start, or the sign-in is lost with the
+container.
 
-This needs a **Codex image of 0.0.6 or newer** — earlier ones carry no sign-in
-command and report no account, so the app offers nothing. It also needs
-`OPENAB_ACP_CONTROL_KEY`, which is what the operator channel above is for: set
-it, and register it alongside the address and the password.
-
-```sh
-docker run -d --name nuphos-runtime -p 8080:8080 \
-  -e OPENAB_ACP_ENABLED=true \
-  -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
-  -e OPENAB_ACP_CONTROL_KEY="$(openssl rand -hex 32)" \
-  -v nuphos-codex-home:/home/node \
-  ghcr.io/zeabur/nuphos-runtime:0.0.6-codex
-```
-
-Then **Settings → Agent → Sign in** on the runtime's card. The credential the
-flow mints stays in the container: only the device code and the verification
-link cross the wire, and the runtime reports afterwards whether it holds a
-credential, so the card stops asking.
-
-The published Codex image carries the two settings that enable this — the
-sign-in command and the path it writes — so nothing else is needed. A
-hand-built Codex image must pass them itself:
+The published Codex image carries the two settings that enable this — the sign-in
+command and the path it writes. A hand-built Codex image must pass them itself:
 
 ```sh
 --build-arg 'RUNTIME_LOGIN_COMMAND=node /opt/nuphos-runtime/codex-login.mjs --install' \
 --build-arg RUNTIME_AUTH_FILE=/home/node/.codex/auth.json
 ```
 
-A Claude Code image sets neither on purpose: its account arrives with the
-session, so there is no file to sign in to and none to report on.
+A Claude Code image sets neither on purpose: its account arrives with the session,
+so there is no file to sign in to and none to report on.
 
 Self-hosting the rest of Nuphos is in progress and not documented here.
 
