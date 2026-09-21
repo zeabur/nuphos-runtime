@@ -164,8 +164,11 @@ on the container first, then rotate it in Settings.
 
 Once the runtime is registered, the app can run Codex's device flow inside the
 container and show you the code, instead of you finding a shell on the host.
-This is what `OPENAB_ACP_CONTROL_KEY` above is for — set it, and register it
-alongside the address and the password:
+
+This needs a **Codex image of 0.0.5 or newer** — earlier ones carry no sign-in
+command and report no account, so the app offers nothing. It also needs
+`OPENAB_ACP_CONTROL_KEY`, which is what the operator channel above is for: set
+it, and register it alongside the address and the password.
 
 ```sh
 docker run -d --name nuphos-runtime -p 8080:8080 \
