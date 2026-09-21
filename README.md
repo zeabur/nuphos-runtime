@@ -37,6 +37,7 @@ until someone re-reviews the patch.
 | --- | --- |
 | `/opt/nuphos-claude-agent-acp` | Claude adapter (0.74.0, Agent SDK 0.3.261), patched to publish session state and to bridge HTTP MCP servers |
 | `/opt/nuphos-codex-acp` | Codex adapter (1.1.4, Codex CLI 0.153.4), patched for per-session instructions and environment, MCP bridging, and steering an active turn |
+| `/etc/openab/config.toml` | The gateway config the entrypoint reads, so the container starts with nothing mounted; a mount at this path replaces it |
 | `/opt/runtime-defaults.mjs` | Applies a model, reasoning effort and fast-mode default to a new session |
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
 | `/opt/nuphos-runtime/runtime-guard.sh` | Sourced via `BASH_ENV`; refreshes per-turn credentials into the shell environment and sets a memory ceiling |
@@ -90,21 +91,53 @@ only reaches users through a rebuild of both.
 
 ## Running one
 
-The image's entrypoint is `openab run -c /etc/openab/config.toml`, so a runtime
-needs that config file, a credential for the agent, and a way for the backend
-to reach it. Nuphos provisions all three; running one by hand means supplying
-them yourself:
+Starting a runtime takes one secret: the password a client presents to open an
+ACP session.
 
-- **Config.** See [OpenAB's documentation](https://github.com/openabdev/openab)
-  for `config.toml` and the ACP listener.
-- **Credentials.** Claude Code uses an OAuth token; Codex uses a device-code
-  login (`codex login --device-auth`) whose `auth.json` is then seeded into
-  `$CODEX_HOME`. Neither belongs in an image, a command line, or a log.
-- **Registration.** A workspace administrator registers the runtime's URL and
-  auth key with the backend, which then routes conversations to it.
+```sh
+docker run -d --name nuphos-runtime -p 8080:8080 \
+  -e OPENAB_ACP_ENABLED=true \
+  -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
+  ghcr.io/zeabur/nuphos-runtime:0.0.4-claude-code
+```
 
-Self-hosting the whole of Nuphos, including runtimes you run yourself, is
-in progress and not yet documented here.
+ACP is then served at `ws://<host>:8080/acp`. The key travels as
+`Authorization: Bearer <key>` or as the `openab.bearer.<key>` WebSocket
+subprotocol; an upgrade without it is refused with `401`. Setting it is not
+optional on a routable address — openab declines to mount `/acp` at all when a
+non-loopback bind has no key, rather than expose an unauthenticated agent.
+
+The image ships a default `/etc/openab/config.toml`, so nothing has to be
+mounted for the container to start. openab reads that one path and merges
+nothing, so your own file replaces the default outright:
+
+```sh
+-v ./config.toml:/etc/openab/config.toml:ro
+```
+
+The baked default holds only what is true of the image — the agent's MCP call
+timeouts, the `BASH_ENV` guard, and for Codex the containerized
+`agent-full-access` mode. Anything sized to a particular deployment, such as
+`[pool]` capacity or per-tool memory ceilings, is left to whoever knows the
+container's limits. The agent command itself is not pinned there: it stays on
+`OPENAB_AGENT_COMMAND`, which each variant's base image sets. See
+[OpenAB's documentation](https://github.com/openabdev/openab) for the rest of
+`config.toml`.
+
+### What each provider needs beyond the password
+
+| Variant | Provider account |
+| --- | --- |
+| `claude-code` | Nothing to supply. Nuphos delivers the account over the ACP session once the runtime is registered. |
+| `codex` | A one-time sign-in inside the container: `docker exec -it nuphos-runtime codex login --device-auth`. Delivering a Codex account from the app is not wired up yet. |
+
+Codex credentials land in `$HOME/.codex`, which is lost when the container is
+replaced; mount a volume at `/home/node` to keep them. A Claude Code runtime
+needs no volume, because it holds no credential of its own.
+
+Finally, a workspace administrator registers the runtime's address and that
+same password in **Settings → Agent**, which is what routes conversations to
+it. Self-hosting the rest of Nuphos is in progress and not documented here.
 
 ## Versions and tags
 
