@@ -19,8 +19,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Test session configuration and credential persistence
-        run: node --test test/codex-runtime.test.mjs test/codex-login.test.mjs test/runtime-defaults.test.mjs test/runtime-credentials.test.mjs
+      - name: Test the image's helpers, defaults and release gate
+        run: npm test
       - name: Install the pinned Codex ACP adapter
         run: npm ci --ignore-scripts --prefix image/codex-acp
       - name: Exercise the patched adapter against a Codex App Server fixture

@@ -142,6 +142,15 @@ RUN arch="$(dpkg --print-architecture)" \
  && chmod +x /usr/local/bin/zeabur \
  && zeabur version
 
+# openab exits when the file its CMD names is missing, so the image carries one
+# and a bare `docker run` needs no volume. A mount at /etc/openab/config.toml
+# replaces this file; openab reads that single path and merges nothing.
+COPY openab-config.claude-code.toml openab-config.codex.toml /tmp/nuphos-config/
+RUN install -d -m 755 /etc/openab \
+ && install -m 644 "/tmp/nuphos-config/openab-config.${RUNTIME_PROVIDER}.toml" \
+      /etc/openab/config.toml \
+ && rm -rf /tmp/nuphos-config
+
 # Version checks above run as root and drop state dirs into $HOME.
 RUN chown -R node:node /home/node
 
@@ -149,4 +158,5 @@ USER node
 RUN test -x /opt/nuphos-runtime \
  && test -r /opt/nuphos-runtime/mcp-http-bridge.mjs \
  && test -r /opt/nuphos-runtime/runtime-guard.sh \
- && test -r /opt/nuphos-runtime/codex-login.mjs
+ && test -r /opt/nuphos-runtime/codex-login.mjs \
+ && test -r /etc/openab/config.toml
