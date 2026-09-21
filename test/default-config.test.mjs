@@ -37,3 +37,9 @@ test('the default carries nothing tied to one deployment', () => {
     assert.doesNotMatch(config, /^\s*max_sessions\s*=/mu, `${variant} pins pool capacity`)
   }
 })
+
+test('codex stays in full-access mode when openab restores a session', () => {
+  const config = configs.get('codex')
+  assert.match(config, /^INITIAL_AGENT_MODE = "agent-full-access"$/mu)
+  assert.doesNotMatch(config, /default_config_options/u)
+})

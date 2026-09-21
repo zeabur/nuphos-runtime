@@ -11,8 +11,8 @@
 
 [agent.env]
 BASH_ENV = "/opt/nuphos-runtime/runtime-guard.sh"
-
-[pool]
 # The container is the security boundary, so Codex need not ask per tool; an
 # ACP client that answers no permission prompt would otherwise stall the turn.
-default_config_options = { mode = "agent-full-access" }
+# Set here, not as a [pool] config option: openab sends those only after
+# session/new, so a session restored with session/load would fall back to `agent`.
+INITIAL_AGENT_MODE = "agent-full-access"
