@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -60,6 +60,41 @@ test('parallel device logins use separate temporary homes and never inherit acco
     const [a, b] = await Promise.all([run(), run()])
 
     assert.notEqual(a, b)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('--install writes the credential into this container and keeps it off the wire', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codex-login-install-test-'))
+  const script = join(directory, 'cli.mjs')
+  const codexHome = join(directory, 'nested', 'codex')
+  const secret = JSON.stringify({ tokens: { access_token: 'do-not-emit-me' } })
+
+  try {
+    await writeFile(
+      script,
+      `import { writeFileSync } from 'node:fs';
+      writeFileSync(process.env.CODEX_HOME + '/auth.json', ${JSON.stringify(secret)});`,
+    )
+    const frames = []
+
+    await runDeviceLogin({
+      args: [script],
+      install: true,
+      authDirectory: codexHome,
+      emit: (frame) => frames.push(frame),
+    })
+    // The credential-free frame is the whole point: nothing outside the container
+    // needs the credential, so nothing outside the container receives it.
+    assert.deepEqual(frames, [{ type: 'authenticated' }])
+    assert.equal(JSON.stringify(frames).includes('do-not-emit-me'), false)
+    assert.equal(await readFile(join(codexHome, 'auth.json'), 'utf8'), secret)
+    assert.equal((await stat(join(codexHome, 'auth.json'))).mode & 0o777, 0o600)
+    // `seed-codex-auth.sh` compares this marker, so a self-installed credential has to
+    // carry the same revision its own bytes would produce.
+    assert.match(await readFile(join(codexHome, '.nuphos-auth-revision'), 'utf8'), /^[0-9a-f]{16}$/u)
+    await assert.rejects(readFile(join(codexHome, 'auth.json.new')), { code: 'ENOENT' })
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

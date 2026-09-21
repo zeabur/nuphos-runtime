@@ -129,7 +129,7 @@ container's limits. The agent command itself is not pinned there: it stays on
 | Variant | Provider account |
 | --- | --- |
 | `claude-code` | Nothing to supply. Nuphos delivers the account over the ACP session once the runtime is registered. |
-| `codex` | A one-time sign-in inside the container: `docker exec -it nuphos-runtime codex login --device-auth`. Delivering a Codex account from the app is not wired up yet. |
+| `codex` | A one-time device sign-in, driven from the app once the runtime is registered — see below. `docker exec -it nuphos-runtime codex login --device-auth` still works if you would rather do it on the host. |
 
 Codex credentials land in `$HOME/.codex`, which is lost when the container is
 replaced; mount a volume at `/home/node` to keep them. A Claude Code runtime
@@ -150,7 +150,8 @@ For the agent to reach Nuphos' own tools, the container also needs
 `OPENAB_ACP_MCP_SERVERS=true`, and it must be able to resolve and reach the
 backend the tools are served from. `OPENAB_ACP_CONTROL_KEY` is optional: a
 runtime without one holds conversations perfectly well, but the operator
-channel — live status, pending decisions, steering — stays dark.
+channel — live status, pending decisions, steering, and the Codex sign-in
+below — stays dark.
 
 Two things a self-hosted runtime does not get yet: the team's skill bundle,
 which is delivered only to runtimes Nuphos provisions, and the `/workspace`
@@ -158,6 +159,42 @@ layout a managed pod is built with. Both are on the way.
 
 Deleting a runtime from Settings does not revoke its password. Change the key
 on the container first, then rotate it in Settings.
+
+### Signing Codex in from the app
+
+Once the runtime is registered, the app can run Codex's device flow inside the
+container and show you the code, instead of you finding a shell on the host.
+
+This needs a **Codex image of 0.0.5 or newer** — earlier ones carry no sign-in
+command and report no account, so the app offers nothing. It also needs
+`OPENAB_ACP_CONTROL_KEY`, which is what the operator channel above is for: set
+it, and register it alongside the address and the password.
+
+```sh
+docker run -d --name nuphos-runtime -p 8080:8080 \
+  -e OPENAB_ACP_ENABLED=true \
+  -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
+  -e OPENAB_ACP_CONTROL_KEY="$(openssl rand -hex 32)" \
+  -v nuphos-codex-home:/home/node \
+  ghcr.io/zeabur/nuphos-runtime:0.0.5-codex
+```
+
+Then **Settings → Agent → Sign in** on the runtime's card. The credential the
+flow mints stays in the container: only the device code and the verification
+link cross the wire, and the runtime reports afterwards whether it holds a
+credential, so the card stops asking.
+
+The published Codex image carries the two settings that enable this — the
+sign-in command and the path it writes — so nothing else is needed. A
+hand-built Codex image must pass them itself:
+
+```sh
+--build-arg 'RUNTIME_LOGIN_COMMAND=node /opt/nuphos-runtime/codex-login.mjs --install' \
+--build-arg RUNTIME_AUTH_FILE=/home/node/.codex/auth.json
+```
+
+A Claude Code image sets neither on purpose: its account arrives with the
+session, so there is no file to sign in to and none to report on.
 
 Self-hosting the rest of Nuphos is in progress and not documented here.
 
