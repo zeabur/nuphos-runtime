@@ -4,6 +4,25 @@ set -euo pipefail
 : "${NUPHOS_RUNTIME_SKILLS_URL:?runtime skills URL is unavailable}"
 : "${NUPHOS_RUNTIME_SKILLS_TOKEN:?runtime skills credential is unavailable}"
 
+# These used to arrive only from a pod spec an operator wrote. A self-hosted runtime
+# takes them from the session instead, so they are now untrusted input to a file whose
+# syntax is line-oriented: a newline inside either value would add curl directives of
+# the caller's choosing — another `url`, an `output` path, an `upload-file`. A control
+# character, a quote or a backslash has no legitimate place in either, so refuse the
+# whole run rather than try to quote around it.
+reject_unusable() {
+  if [[ $2 =~ [[:cntrl:]\"\\] ]]; then
+    printf 'runtime skills %s contains an unusable character\n' "$1" >&2
+    exit 1
+  fi
+}
+reject_unusable URL "$NUPHOS_RUNTIME_SKILLS_URL"
+reject_unusable credential "$NUPHOS_RUNTIME_SKILLS_TOKEN"
+if [[ ! $NUPHOS_RUNTIME_SKILLS_URL =~ ^https?:// ]]; then
+  printf 'runtime skills URL must be http(s)\n' >&2
+  exit 1
+fi
+
 umask 077
 runtime_workspace=${NUPHOS_RUNTIME_WORKSPACE:-/workspace}
 claude_dir="$runtime_workspace/.claude"
@@ -22,16 +41,23 @@ revision_file="$claude_dir/.skills-revision"
 # answers 304 with no body, and one that does not simply sends the bundle.
 {
   printf 'silent\nshow-error\nfail-with-body\nconnect-timeout = 10\nmax-time = 120\n'
-  printf 'url = "%s"\n' "$NUPHOS_RUNTIME_SKILLS_URL"
+  # Only the credential still goes through the config file, because argv is world
+  # readable through /proc and this is the one value that must not be. The URL rides
+  # the command line, where no config syntax can reinterpret it.
   printf 'header = "Authorization: Bearer %s"\n' "$NUPHOS_RUNTIME_SKILLS_TOKEN"
+  # The revision comes from a bundle the backend produced, so it is no more trusted
+  # than the values above; send it only when it cannot carry syntax of its own.
   if [[ -d $claude_dir/skills && -r $revision_file ]]; then
-    printf 'header = "If-None-Match: \\"%s\\""\n' "$(cat "$revision_file")"
+    installed_revision=$(cat "$revision_file")
+    if [[ $installed_revision =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+      printf 'header = "If-None-Match: \\"%s\\""\n' "$installed_revision"
+    fi
   fi
   printf 'output = "%s"\n' "$bundle"
   printf 'write-out = "%%{http_code}"\n'
 } >"$curl_config"
 chmod 600 "$curl_config"
-status=$(curl --config "$curl_config")
+status=$(curl --config "$curl_config" -- "$NUPHOS_RUNTIME_SKILLS_URL")
 
 # 304 is a success with an empty body, so it must return before the body is
 # parsed — `jq` on nothing would fail the script under `set -e`, and this script
@@ -43,6 +69,23 @@ fi
 jq -e '.revision | type == "string"' "$bundle" >/dev/null
 revision=$(jq -er '.revision' "$bundle")
 
+# From here to the end is one critical section. A self-hosted runtime runs this per
+# session, so two can install at once: each moves its own `skills.<revision>.<pid>`
+# into place, and the first to reach the cleanup at the bottom would delete the
+# other's tree before that one had swapped the symlink onto it, leaving
+# `.claude/skills` dangling. The provisioner's own re-runs can overlap a session's
+# for the same reason.
+#
+# `flock` rather than a lock directory: the timeout around this script kills the
+# process group, and a directory would survive that and wedge every later sync.
+# A kernel lock is released when the descriptor closes, however the process died.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$claude_dir/.skills-sync.lock"
+  flock 9
+fi
+
+# Re-read under the lock: a sync that finished while this one was waiting may have
+# already installed this very revision.
 # The provisioner re-runs this on every reconcile of a live runtime, so the
 # usual outcome is that the bundle already on disk is the one being fetched.
 # Reinstalling it would be pure churn under a running agent, so stop here.
@@ -50,7 +93,10 @@ if [[ -d $claude_dir/skills && -r $revision_file && $(cat "$revision_file") == "
   exit 0
 fi
 
-jq -ce '.files[]' "$bundle" | while IFS= read -r file; do
+# No `-e` here: it makes jq exit 4 when a filter yields nothing at all, so a team
+# that has no skills yet would fail the sync outright rather than install an empty
+# tree. A malformed `.files` still fails, because iterating a non-array is an error.
+jq -c '.files[]' "$bundle" | while IFS= read -r file; do
   relative=$(printf '%s' "$file" | jq -er '.path | select(type == "string" and length > 0)')
   case "$relative" in
     /*|*..*|*//*|*\\*) printf 'unsafe runtime skill path: %s\n' "$relative" >&2; exit 1 ;;

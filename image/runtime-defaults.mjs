@@ -22,14 +22,17 @@ export async function nuphosSyncRuntimeSkills(params, run) {
     const child = spawn(run?.script ?? '/usr/local/bin/nuphos-sync-skills', {
       // The bundle credential is the only thing this child needs from us; it must not
       // inherit the agent's account or the runtime's transport keys.
+      // Deliberately not NUPHOS_RUNTIME_WORKSPACE. The script mkdirs under it,
+      // replaces files in it and recursively removes trees beneath it, so a path
+      // chosen per session would be a write primitive pointed wherever the caller
+      // liked. The image's own workspace is the script's default and the only one
+      // a session can reach; an operator relocating it does so in the container's
+      // environment, which this child does not inherit.
       env: {
         PATH: '/usr/local/bin:/usr/bin:/bin',
         HOME: '/home/node',
         NUPHOS_RUNTIME_SKILLS_URL: url,
         NUPHOS_RUNTIME_SKILLS_TOKEN: token,
-        ...(env.NUPHOS_RUNTIME_WORKSPACE
-          ? { NUPHOS_RUNTIME_WORKSPACE: env.NUPHOS_RUNTIME_WORKSPACE }
-          : {}),
         ...(run?.env ?? {}),
       },
       stdio: ['ignore', 'ignore', 'ignore'],

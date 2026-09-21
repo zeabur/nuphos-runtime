@@ -227,6 +227,93 @@ test('a backend that ignores the entity tag still installs the bundle', async ()
   }
 })
 
+test('a workspace with no skills yet installs an empty tree rather than failing', async () => {
+  // `jq -e` exits 4 when its filter yields nothing, so an empty `files` array used to
+  // fail the whole sync under `set -e` — on provisioned pods too, not just here.
+  const server = await serveBundles(() => ({ revision: 'rev-empty', files: [] }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+
+    assert.deepEqual(await sync(env), { code: 0, stderr: '' })
+    assert.equal(lstatSync(join(claude, 'skills')).isSymbolicLink(), true)
+    assert.deepEqual(readdirSync(join(claude, 'skills')), [])
+    assert.equal(readFileSync(join(claude, '.skills-revision'), 'utf8'), 'rev-empty')
+  } finally {
+    await server.close()
+  }
+})
+
+test('a value that could rewrite the curl config is refused outright', async () => {
+  const server = await serveBundles(() => ({ revision: 'rev-1', files: [] }))
+
+  try {
+    const base = workspaceEnv(server.url)
+    // The config file is line-oriented, so a newline in either value would append
+    // directives of the caller's choosing. These arrive from session metadata now,
+    // so the script must refuse rather than try to quote around them.
+    const stolen = join(base.NUPHOS_RUNTIME_WORKSPACE, 'stolen')
+    const injections = [
+      { NUPHOS_RUNTIME_SKILLS_URL: `${server.url}"\noutput = "${stolen}` },
+      { NUPHOS_RUNTIME_SKILLS_TOKEN: `t"\noutput = "${stolen}` },
+      { NUPHOS_RUNTIME_SKILLS_URL: `${server.url}\r\nupload-file = "/etc/passwd` },
+      { NUPHOS_RUNTIME_SKILLS_TOKEN: 'back\\slash' },
+      // Only http(s) may be fetched; `file://` would read the container's disk.
+      { NUPHOS_RUNTIME_SKILLS_URL: 'file:///etc/passwd' },
+    ]
+
+    for (const override of injections) {
+      const { code, stderr } = await sync({ ...base, ...override })
+
+      assert.equal(code, 1, JSON.stringify(override))
+      assert.match(stderr, /unusable character|must be http/u)
+    }
+    assert.equal(existsSync(stolen), false)
+    // The unmodified pair still works, so the guard is not simply refusing everything.
+    assert.deepEqual(await sync(base), { code: 0, stderr: '' })
+  } finally {
+    await server.close()
+  }
+})
+
+test('concurrent syncs never leave the live tree dangling', async (t) => {
+  // The lock is what makes this safe, and `flock` is how it is taken.
+  if (!existsSync('/usr/bin/flock') && !existsSync('/opt/homebrew/bin/flock')) {
+    t.skip('flock is unavailable; the image ships util-linux and CI runs Linux')
+
+    return
+  }
+  let revision = 0
+  const server = await serveBundles(() => ({
+    // A distinct revision per request, so every caller believes it has new work and
+    // reaches the install/swap/cleanup section that used to race.
+    revision: `rev-${++revision}`,
+    files: [{ path: 'kept/SKILL.md', contentBase64: encode('# One'), executable: false }],
+  }))
+
+  try {
+    const env = workspaceEnv(server.url)
+    const claude = join(env.NUPHOS_RUNTIME_WORKSPACE, '.claude')
+    const results = await Promise.all(Array.from({ length: 6 }, () => sync(env)))
+
+    for (const result of results) assert.deepEqual(result, { code: 0, stderr: '' })
+    // Whoever won last, the symlink must point at a tree that still exists: the
+    // cleanup used to delete a tree another process had moved but not yet linked.
+    const installed = readlinkSync(join(claude, 'skills'))
+
+    assert.equal(existsSync(join(claude, installed)), true)
+    assert.equal(readFileSync(join(claude, 'skills/kept/SKILL.md'), 'utf8'), '# One')
+    assert.deepEqual(
+      readdirSync(claude).filter((entry) => entry.startsWith('skills.')),
+      [installed],
+    )
+    assert.equal(readFileSync(join(claude, '.skills-revision'), 'utf8'), installed.split('.')[1])
+  } finally {
+    await server.close()
+  }
+})
+
 test('swaps a new bundle in without ever exposing a missing tree', async () => {
   const bundles = [
     {
