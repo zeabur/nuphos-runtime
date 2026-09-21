@@ -27,6 +27,19 @@ test('the published Codex image carries both values and the Claude Code image ca
   assert.ok(build.includes('RUNTIME_AUTH_FILE=${{ steps.tags.outputs.auth_file }}'))
 })
 
+test('the image bakes the ACP environment a provisioned pod has always had', () => {
+  // A self-hosted container reaching these by hand was the difference between a
+  // runtime that chats with tools and one that accepts a session and then refuses
+  // its first prompt. openab reads all three only as environment, so config.toml
+  // cannot carry them.
+  assert.match(dockerfile, /^ENV OPENAB_ACP_MCP_SERVERS=true \\$/mu)
+  assert.match(dockerfile, /^ {4}OPENAB_ACP_STREAMING=true \\$/mu)
+  assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client$/mu)
+  // The operator's own switch for exposing /acp stays the operator's.
+  assert.doesNotMatch(dockerfile, /ENV[^\n]*OPENAB_ACP_ENABLED/u)
+  assert.doesNotMatch(dockerfile, /^ {4}OPENAB_ACP_ENABLED/mu)
+})
+
 test('the sign-in command names the flag that keeps the credential in the container', () => {
   // Without `--install` the credential rides the frame back to the caller, which is
   // the Kubernetes exec path's contract, not this one's.

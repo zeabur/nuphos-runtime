@@ -66,6 +66,22 @@ RUN if [ "${RUNTIME_PROVIDER}" = codex ]; then \
 
 ENV PATH="/opt/nuphos-codex-acp/node_modules/.bin:/opt/nuphos-claude-agent-acp/node_modules/.bin:${PATH}"
 
+# What a Nuphos-provisioned pod has always set, which a self-hosted container had
+# to rediscover by hand. None of the three can move into config.toml — openab reads
+# them only as environment.
+#
+# GATEWAY_ALLOWED_USERS is the gateway-wide L3 identity allowlist, not an ACP switch:
+# openab defaults it to deny-all, and an ACP prompt arrives as sender `acp_client`, so
+# without this entry the runtime accepts a session and then refuses its first prompt.
+# An operator who also enables Discord, Slack or LINE must ADD their sender ids here
+# rather than drop the line, or those platforms are denied instead.
+#
+# OPENAB_ACP_ENABLED is deliberately absent: the README documents it as the operator's
+# own switch for exposing /acp, and a baked default would take that decision away.
+ENV OPENAB_ACP_MCP_SERVERS=true \
+    OPENAB_ACP_STREAMING=true \
+    GATEWAY_ALLOWED_USERS=acp_client
+
 # What `_openab/runtime/login` runs, and where the credential it produces lands. Both are
 # empty unless the build supplies them, because only Codex keeps its credential in a file:
 # a Claude Code account arrives with the session, so this image must report "cannot tell"
