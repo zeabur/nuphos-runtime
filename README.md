@@ -135,9 +135,31 @@ Codex credentials land in `$HOME/.codex`, which is lost when the container is
 replaced; mount a volume at `/home/node` to keep them. A Claude Code runtime
 needs no volume, because it holds no credential of its own.
 
-Finally, a workspace administrator registers the runtime's address and that
-same password in **Settings → Agent**, which is what routes conversations to
-it. Self-hosting the rest of Nuphos is in progress and not documented here.
+### Registering it with Nuphos
+
+A workspace administrator adds the runtime in **Settings → Agent** with its
+address and that same password. Two things the backend insists on:
+
+- **The address must be `wss://`.** Plain `ws://` is accepted only for an
+  in-cluster `*.svc` host, so a runtime on a VPS needs TLS terminated in front
+  of it.
+- **The password must be at least 32 characters.** `openssl rand -hex 32`
+  clears that with room to spare.
+
+For the agent to reach Nuphos' own tools, the container also needs
+`OPENAB_ACP_MCP_SERVERS=true`, and it must be able to resolve and reach the
+backend the tools are served from. `OPENAB_ACP_CONTROL_KEY` is optional: a
+runtime without one holds conversations perfectly well, but the operator
+channel — live status, pending decisions, steering — stays dark.
+
+Two things a self-hosted runtime does not get yet: the team's skill bundle,
+which is delivered only to runtimes Nuphos provisions, and the `/workspace`
+layout a managed pod is built with. Both are on the way.
+
+Deleting a runtime from Settings does not revoke its password. Change the key
+on the container first, then rotate it in Settings.
+
+Self-hosting the rest of Nuphos is in progress and not documented here.
 
 ## Versions and tags
 
