@@ -163,11 +163,15 @@ are denied instead.
 perfectly well, but the operator channel — live status, pending decisions,
 steering, and the Codex sign-in below — stays dark.
 
-Two things a self-hosted runtime does not get yet: the team's skill bundle and
-the `/workspace` layout a managed pod is built with. From 0.0.6 the image will
-fetch the bundle itself for any session whose environment carries a bundle URL
-and token, but nothing issues those yet — until the backend does, a self-hosted
-runtime still runs without the team's skills.
+From 0.0.6 the runtime fetches the team's skill bundle itself, for any session
+whose environment carries a bundle URL and token — the backend issues those only
+for a runtime it did not provision, since it pushes the bundle straight into one
+it did. A workspace on a backend that issues neither runs without the team's
+skills; that is the only thing missing, and it costs nothing when there is no
+bundle to fetch.
+
+The `/workspace` layout a managed pod is built with is still not reproduced
+here.
 
 Deleting a runtime from Settings does not revoke its password. Change the key
 on the container first, then rotate it in Settings.
