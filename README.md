@@ -116,6 +116,12 @@ ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
 nothing more than using the address they hand you; on a bare VPS, a reverse
 proxy such as Caddy does it in one line.
 
+Before pasting the address into Nuphos, open the base URL (`http://<host>:8080/`
+or its `https://` equivalent once TLS is in front) in a browser — openab serves
+an unauthenticated status page there confirming the runtime is up, its provider,
+and its version. It never shows the password, the derived key, or anything else
+secret.
+
 The password is the only thing standing in front of an agent that holds your
 workspace's cloud credentials, so openab will not serve `/acp` on a routable
 address without it, and refuses any upgrade that does not present it (`401`).
