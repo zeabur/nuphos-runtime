@@ -76,9 +76,10 @@ ENV PATH="/opt/nuphos-codex-acp/node_modules/.bin:/opt/nuphos-claude-agent-acp/n
 # An operator who also enables Discord, Slack or LINE must ADD their sender ids here
 # rather than drop the line, or those platforms are denied instead.
 #
-# OPENAB_ACP_ENABLED is deliberately absent: the README documents it as the operator's
-# own switch for exposing /acp, and a baked default would take that decision away.
-ENV OPENAB_ACP_MCP_SERVERS=true \
+# openab will not mount /acp on a routable address without OPENAB_ACP_AUTH_KEY, so
+# enabling it here exposes nothing until the password is set. Override with =false.
+ENV OPENAB_ACP_ENABLED=true \
+    OPENAB_ACP_MCP_SERVERS=true \
     OPENAB_ACP_STREAMING=true \
     GATEWAY_ALLOWED_USERS=acp_client
 
@@ -180,9 +181,20 @@ RUN install -d -m 755 /etc/openab \
 # Version checks above run as root and drop state dirs into $HOME.
 RUN chown -R node:node /home/node
 
+# `node` cannot create a directory at the root, and a self-hosted container has
+# nothing mounted here. A volume at this path replaces it.
+RUN install -d -o node -g node -m 755 /workspace
+
+COPY --chmod=755 runtime-start.sh /usr/local/bin/nuphos-runtime-start
+# In the entrypoint so a replaced command still runs it.
+ENTRYPOINT ["tini", "--", "/usr/local/bin/nuphos-runtime-start"]
+CMD ["openab", "run", "-c", "/etc/openab/config.toml"]
+
 USER node
 RUN test -x /opt/nuphos-runtime \
  && test -r /opt/nuphos-runtime/mcp-http-bridge.mjs \
  && test -r /opt/nuphos-runtime/runtime-guard.sh \
  && test -r /opt/nuphos-runtime/codex-login.mjs \
- && test -r /etc/openab/config.toml
+ && test -r /etc/openab/config.toml \
+ && test -x /usr/local/bin/nuphos-runtime-start \
+ && test -w /workspace

@@ -33,7 +33,10 @@ test('the default never shadows the agent command the base image bakes', () => {
 test('the default carries nothing tied to one deployment', () => {
   for (const [variant, config] of configs) {
     assert.doesNotMatch(config, /:\/\//u, `${variant} bakes a URL`)
-    assert.doesNotMatch(config, /^\s*working_dir\s*=/mu, `${variant} pins a host path`)
+    // The one working directory allowed is the one the image itself creates, so it is
+    // an image fact like BASH_ENV's path, not a host path. Any other value would be.
+    for (const [, dir] of config.matchAll(/^\s*working_dir\s*=\s*"([^"]*)"/gmu))
+      assert.equal(dir, '/workspace', `${variant} pins a host path`)
     assert.doesNotMatch(config, /^\s*max_sessions\s*=/mu, `${variant} pins pool capacity`)
   }
 })

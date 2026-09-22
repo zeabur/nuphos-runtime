@@ -30,14 +30,48 @@ test('the published Codex image carries both values and the Claude Code image ca
 test('the image bakes the ACP environment a provisioned pod has always had', () => {
   // A self-hosted container reaching these by hand was the difference between a
   // runtime that chats with tools and one that accepts a session and then refuses
-  // its first prompt. openab reads all three only as environment, so config.toml
+  // its first prompt. openab reads all four only as environment, so config.toml
   // cannot carry them.
-  assert.match(dockerfile, /^ENV OPENAB_ACP_MCP_SERVERS=true \\$/mu)
+  assert.match(dockerfile, /^ENV OPENAB_ACP_ENABLED=true \\$/mu)
+  assert.match(dockerfile, /^ {4}OPENAB_ACP_MCP_SERVERS=true \\$/mu)
   assert.match(dockerfile, /^ {4}OPENAB_ACP_STREAMING=true \\$/mu)
   assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client$/mu)
-  // The operator's own switch for exposing /acp stays the operator's.
-  assert.doesNotMatch(dockerfile, /ENV[^\n]*OPENAB_ACP_ENABLED/u)
-  assert.doesNotMatch(dockerfile, /^ {4}OPENAB_ACP_ENABLED/mu)
+})
+
+test('both agents run in the workspace the image creates, never one without the other', () => {
+  // openab ignores the cwd a client sends and spawns the agent in `working_dir`, which
+  // defaults to $HOME — where no skill ever lands. The two halves are coupled: a
+  // `working_dir` the image does not create fails every spawn with ENOENT, so a
+  // runtime that sets one without the other cannot start an agent at all.
+  for (const provider of ['claude-code', 'codex']) {
+    const config = readFileSync(
+      new URL(`../image/openab-config.${provider}.toml`, import.meta.url),
+      'utf8',
+    )
+
+    // The [agent] table runs until the next line that opens another table.
+    const agentTable = config.split(/^\[agent\]$/mu)[1]?.split(/^\[/mu)[0] ?? ''
+
+    assert.match(agentTable, /^working_dir = "\/workspace"$/mu, provider)
+  }
+  assert.match(dockerfile, /^RUN install -d -o node -g node -m 755 \/workspace$/mu)
+})
+
+test('the password is the only variable an operator must set', () => {
+  // Neither key is baked: the auth key is the operator's secret, and the operator key
+  // is derived from it at start. A baked value for either would be the same secret in
+  // every container.
+  assert.doesNotMatch(dockerfile, /OPENAB_ACP_AUTH_KEY=/u)
+  assert.doesNotMatch(dockerfile, /OPENAB_ACP_CONTROL_KEY=/u)
+  // The derivation runs whatever command replaces the default, so it is part of the
+  // entrypoint, with tini kept as PID 1 for signals and reaping.
+  assert.match(
+    dockerfile,
+    /^ENTRYPOINT \["tini", "--", "\/usr\/local\/bin\/nuphos-runtime-start"\]$/mu,
+  )
+  assert.match(dockerfile, /^CMD \["openab", "run", "-c", "\/etc\/openab\/config\.toml"\]$/mu)
+  // Nothing mounted means nothing at /workspace, and `node` cannot create it there.
+  assert.match(dockerfile, /^RUN install -d -o node -g node -m 755 \/workspace$/mu)
 })
 
 test('the sign-in command names the flag that keeps the credential in the container', () => {
