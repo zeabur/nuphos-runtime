@@ -93,6 +93,16 @@ ARG RUNTIME_AUTH_FILE
 ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
     OPENAB_RUNTIME_AUTH_FILE="${RUNTIME_AUTH_FILE}"
 
+# Read by openab's `GET /` status page (see zeabur/openab#40): a human-readable
+# runtime label and the image's own release version, so a self-hosted operator
+# can sanity-check a fresh deploy in a browser with zero auth. Same reasoning
+# as RUNTIME_PROVIDER above -- Dockerfile ENV cannot branch, so the caller
+# supplies the label; RUNTIME_VERSION defaults empty for a bare local build.
+ARG RUNTIME_LABEL
+ARG RUNTIME_VERSION
+ENV OPENAB_RUNTIME_LABEL="${RUNTIME_LABEL}" \
+    OPENAB_RUNTIME_VERSION="${RUNTIME_VERSION}"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg jq unzip \
         bash coreutils util-linux procps acct \

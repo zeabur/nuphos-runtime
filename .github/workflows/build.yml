@@ -185,15 +185,18 @@ jobs:
           if [[ "$VARIANT" == "codex" ]]; then
             LOGIN_COMMAND='node /opt/nuphos-runtime/codex-login.mjs --install'
             AUTH_FILE='/home/node/.codex/auth.json'
+            LABEL='Codex'
           else
             LOGIN_COMMAND=''
             AUTH_FILE=''
+            LABEL='Claude Code'
           fi
 
           {
             echo "variant=${VARIANT}"
             echo "login_command=${LOGIN_COMMAND}"
             echo "auth_file=${AUTH_FILE}"
+            echo "label=${LABEL}"
             # The toolset build resolves its base through this tag, so the base
             # must be pushed before it runs.
             echo "base=${RUNTIME_IMAGE}:${SHA12}-base-${VARIANT}"
@@ -243,6 +246,8 @@ jobs:
             RUNTIME_PROVIDER=${{ steps.tags.outputs.variant }}
             RUNTIME_LOGIN_COMMAND=${{ steps.tags.outputs.login_command }}
             RUNTIME_AUTH_FILE=${{ steps.tags.outputs.auth_file }}
+            RUNTIME_LABEL=${{ steps.tags.outputs.label }}
+            RUNTIME_VERSION=${{ needs.plan.outputs.version }}
           tags: ${{ steps.tags.outputs.runtime_tags }}
           labels: |
             org.opencontainers.image.revision=${{ needs.plan.outputs.sha }}
