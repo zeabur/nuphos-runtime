@@ -36,12 +36,12 @@ COPY --chmod=755 seed-codex-auth.sh /usr/local/bin/nuphos-seed-codex-auth
 COPY runtime-defaults.mjs mcp-bridge-config.mjs /opt/
 # Sourced via BASH_ENV, so it is read, never executed.
 COPY --chmod=644 runtime-guard.sh /opt/nuphos-runtime/runtime-guard.sh
-COPY codex-login.mjs mcp-http-bridge.mjs /opt/nuphos-runtime/
+COPY codex-login.mjs mcp-http-bridge.mjs panel-job.mjs /opt/nuphos-runtime/
 # COPY --chmod also affects newly created destination directories.
 # Runtime helpers must be traversable by the non-root init and agent containers.
 RUN chmod 755 /opt/nuphos-runtime \
  && chmod 644 /opt/nuphos-runtime/runtime-guard.sh /opt/nuphos-runtime/codex-login.mjs \
-      /opt/nuphos-runtime/mcp-http-bridge.mjs
+      /opt/nuphos-runtime/mcp-http-bridge.mjs /opt/nuphos-runtime/panel-job.mjs
 
 # Pin the SDK used by the adapter so the model picker lists current models and
 # retains the idle wakeup fixes introduced in SDK 0.3.238.
@@ -92,6 +92,12 @@ ARG RUNTIME_LOGIN_COMMAND
 ARG RUNTIME_AUTH_FILE
 ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
     OPENAB_RUNTIME_AUTH_FILE="${RUNTIME_AUTH_FILE}"
+
+# The one-shot commands `_openab/runtime/job` may run, as `name=argv`. The caller only
+# names a job; it never supplies argv. The timeout ceiling matches the backend's
+# dashboard panel execution budget.
+ENV OPENAB_RUNTIME_JOBS="panel=node --max-old-space-size=512 /opt/nuphos-runtime/panel-job.mjs" \
+    OPENAB_RUNTIME_JOB_MAX_TIMEOUT_MS=300000
 
 # Read by openab's `GET /` status page (see zeabur/openab#40): a human-readable
 # runtime label and the image's own release version, so a self-hosted operator
@@ -205,6 +211,7 @@ RUN test -x /opt/nuphos-runtime \
  && test -r /opt/nuphos-runtime/mcp-http-bridge.mjs \
  && test -r /opt/nuphos-runtime/runtime-guard.sh \
  && test -r /opt/nuphos-runtime/codex-login.mjs \
+ && test -r /opt/nuphos-runtime/panel-job.mjs \
  && test -r /etc/openab/config.toml \
  && test -x /usr/local/bin/nuphos-runtime-start \
  && test -w /workspace
