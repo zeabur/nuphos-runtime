@@ -2,7 +2,7 @@
 // is the job's stdout, and its exit code is the job's exit code.
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { constants, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { text } from 'node:stream/consumers'
 
@@ -46,7 +46,7 @@ try {
     panel.once('exit', (exitCode, exitSignal) => resolve([exitCode, exitSignal]))
   })
 
-  process.exitCode = code ?? (signal ? 128 : 1)
+  process.exitCode = code ?? 128 + (constants.signals[signal] ?? 0)
 } finally {
   await rm(runDir, { recursive: true, force: true })
 }
