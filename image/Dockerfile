@@ -94,8 +94,10 @@ ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
     OPENAB_RUNTIME_AUTH_FILE="${RUNTIME_AUTH_FILE}"
 
 # The one-shot commands `_openab/runtime/job` may run, as `name=argv`. The caller only
-# names a job; it never supplies argv.
-ENV OPENAB_RUNTIME_JOBS="cost-panel=node --max-old-space-size=512 /opt/nuphos-runtime/cost-panel-job.mjs"
+# names a job; it never supplies argv. The timeout ceiling matches the backend's
+# cost-panel execution budget.
+ENV OPENAB_RUNTIME_JOBS="cost-panel=node --max-old-space-size=512 /opt/nuphos-runtime/cost-panel-job.mjs" \
+    OPENAB_RUNTIME_JOB_MAX_TIMEOUT_MS=300000
 
 # Read by openab's `GET /` status page (see zeabur/openab#40): a human-readable
 # runtime label and the image's own release version, so a self-hosted operator

@@ -89,12 +89,13 @@ test('rejects malformed input without writing to stdout', async () => {
   }
 })
 
-test('the image lists the job for OpenAB and ships the script', async () => {
+test('the image lists the job for OpenAB with a 300s ceiling and ships the script', async () => {
   const dockerfile = await readFile(new URL('../image/Dockerfile', import.meta.url), 'utf8')
 
   assert.match(
     dockerfile,
-    /^ENV OPENAB_RUNTIME_JOBS="cost-panel=node --max-old-space-size=512 \/opt\/nuphos-runtime\/cost-panel-job\.mjs"$/mu,
+    /^ENV OPENAB_RUNTIME_JOBS="cost-panel=node --max-old-space-size=512 \/opt\/nuphos-runtime\/cost-panel-job\.mjs" \\$/mu,
   )
+  assert.match(dockerfile, /^ {4}OPENAB_RUNTIME_JOB_MAX_TIMEOUT_MS=300000$/mu)
   assert.match(dockerfile, /^COPY [^\n]*cost-panel-job\.mjs \/opt\/nuphos-runtime\/$/mu)
 })
