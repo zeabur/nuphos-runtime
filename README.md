@@ -42,7 +42,7 @@ until someone re-reviews the patch.
 | `/opt/runtime-defaults.mjs` | Applies a model, reasoning effort and fast-mode default to a new session |
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
 | `/opt/nuphos-runtime/runtime-guard.sh` | Sourced via `BASH_ENV`; refreshes per-turn credentials into the shell environment and sets a memory ceiling |
-| `/opt/nuphos-runtime/cost-panel-job.mjs` | The `cost-panel` job OpenAB runs for `_openab/runtime/job`: writes the panel runner, script and params into a fresh directory and runs `node runner.mjs <dir>`, passing stdout and the exit code through |
+| `/opt/nuphos-runtime/panel-job.mjs` | The `panel` job OpenAB runs for `_openab/runtime/job`: writes the panel runner, script and params into a fresh directory and runs `node runner.mjs <dir>`, passing stdout and the exit code through |
 | `/opt/nuphos-runtime/codex-login.mjs` | Drives Codex's device-code login in an isolated `CODEX_HOME` |
 | `/usr/local/bin/nuphos-sync-skills` | Fetches the workspace's skill bundle and swaps it in atomically — pushed by the provisioner for a managed pod, run per session by `runtime-defaults.mjs` for a self-hosted one |
 | `/usr/local/bin/nuphos-seed-codex-auth` | Seeds Codex credentials from a mounted secret, once per credential revision |

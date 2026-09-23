@@ -1,4 +1,4 @@
-// OpenAB runtime job `cost-panel`: stdin is {runner, script, params}. The panel's stdout
+// OpenAB runtime job `panel`: stdin is {runner, script, params}. The panel's stdout
 // is the job's stdout, and its exit code is the job's exit code.
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { text } from 'node:stream/consumers'
 
 function fail(message) {
-  process.stderr.write(`cost-panel-job: ${message}\n`)
+  process.stderr.write(`panel-job: ${message}\n`)
   process.exit(2)
 }
 
@@ -28,7 +28,7 @@ if (params === null || typeof params !== 'object' || Array.isArray(params)) {
   fail('params must be an object')
 }
 
-const runDir = await mkdtemp(join(tmpdir(), 'cost-panel-'))
+const runDir = await mkdtemp(join(tmpdir(), 'panel-'))
 
 try {
   await writeFile(join(runDir, 'runner.mjs'), runner)
