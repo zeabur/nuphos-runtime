@@ -152,11 +152,25 @@ test('the operator key is derived from a generated password', () => {
 
 test('a home that has run before warns that the new password must be re-entered', () => {
   const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
-  mkdirSync(join(home, '.nuphos-runtime'))
+  const authFile = join(home, 'codex-auth.json')
+  writeFileSync(authFile, '{}')
 
-  const { stdout } = start({}, home)
+  const { stdout } = start({ OPENAB_RUNTIME_AUTH_FILE: authFile }, home)
 
   assert.match(stdout, /^WARNING: .*update it in every Nuphos workspace/u)
+})
+
+test('a custom key file in a directory it does not own leaves that directory alone', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  chmodSync(home, 0o755)
+  const keyFile = join(home, 'runtime-password')
+
+  const { env, stdout } = start({ OPENAB_ACP_AUTH_KEY_FILE: keyFile }, home)
+
+  assert.equal(statSync(home).mode & 0o777, 0o755)
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+  assert.equal(readFileSync(keyFile, 'utf8').trim(), env.OPENAB_ACP_AUTH_KEY)
+  assert.doesNotMatch(stdout, /WARNING/u)
 })
 
 test('a password that is too short fails the start, wherever it came from', () => {

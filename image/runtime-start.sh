@@ -17,15 +17,18 @@ check_password() {
 
 generate_password() {
   key_dir=$(dirname "$key_file")
-  # Besides the password itself, the traces an earlier boot leaves on this home.
+  # Besides the password itself, the traces an earlier boot leaves on this home. A
+  # custom key file may sit in a directory the runtime does not own.
   had_identity=
-  if [ -d "$key_dir" ] || { [ -n "${OPENAB_RUNTIME_AUTH_FILE:-}" ] && [ -e "$OPENAB_RUNTIME_AUTH_FILE" ]; }; then
+  if { [ "$key_file" = "$default_key_file" ] && [ -d "$key_dir" ]; } \
+    || { [ -n "${OPENAB_RUNTIME_AUTH_FILE:-}" ] && [ -e "$OPENAB_RUNTIME_AUTH_FILE" ]; }; then
     had_identity=1
   fi
 
-  (umask 077 && mkdir -p "$key_dir") \
-    || fail "cannot create $key_dir to store the runtime password; set OPENAB_ACP_AUTH_KEY or make it writable."
-  chmod 700 "$key_dir"
+  if [ ! -d "$key_dir" ]; then
+    (umask 077 && mkdir -p "$key_dir") \
+      || fail "cannot create $key_dir to store the runtime password; set OPENAB_ACP_AUTH_KEY or make it writable."
+  fi
   OPENAB_ACP_AUTH_KEY=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
   tmp=$(umask 077 && mktemp "$key_dir/.auth-key.XXXXXX") \
     || fail "cannot write the runtime password to $key_dir."
@@ -36,13 +39,14 @@ generate_password() {
     printf 'WARNING: no runtime password was found at %s, but this home has run a runtime before. A new password was generated: update it in every Nuphos workspace this runtime is connected to.\n' "$key_file"
   fi
   printf 'Generated runtime password (stored in %s): %s — enter it in Nuphos when connecting this runtime. Unless %s is on a persistent volume, the password changes on every restart.\n' \
-    "$key_file" "$OPENAB_ACP_AUTH_KEY" "$(dirname "$key_dir")"
+    "$key_file" "$OPENAB_ACP_AUTH_KEY" "$key_file"
 }
 
 # One set in the environment wins; otherwise the runtime keeps its own on the home
 # volume, generated on first boot.
 if [ "${OPENAB_ACP_ENABLED:-}" = true ] || [ "${OPENAB_ACP_ENABLED:-}" = 1 ]; then
-  key_file=${OPENAB_ACP_AUTH_KEY_FILE:-/home/node/.nuphos-runtime/auth-key}
+  default_key_file=/home/node/.nuphos-runtime/auth-key
+  key_file=${OPENAB_ACP_AUTH_KEY_FILE:-$default_key_file}
   if [ -n "${OPENAB_ACP_AUTH_KEY:-}" ]; then
     check_password OPENAB_ACP_AUTH_KEY
   elif [ -e "$key_file" ]; then
