@@ -1,12 +1,12 @@
 name: Build runtime image
 
-# Builds and pushes the Claude Code and Codex runtime images in two layers:
+# Builds and pushes the Claude Code and Codex runtime images in two steps:
 #
-#   1. third_party/openab/Dockerfile.unified --target <provider>
-#      This layer carries the `openab` gateway binary, so an ACP or pool fix
-#      only ships once this is rebuilt — bumping the submodule alone does
-#      nothing.
-#   2. image/Dockerfile (the Nuphos toolset layer)
+#   1. third_party/openab/Dockerfile.unified --target agentcore
+#      The gateway base. The runtime image takes only its `openab` binary, so
+#      an ACP or pool fix ships once this is rebuilt — bumping the submodule
+#      alone does nothing.
+#   2. image/Dockerfile (the Nuphos runtime image)
 #
 # ⚠️ Publishing does NOT roll anything out. A Nuphos workspace administrator
 # must point each runtime at the new digest in Settings → Agent.
@@ -221,11 +221,9 @@ jobs:
         with:
           context: third_party/openab
           file: third_party/openab/Dockerfile.unified
-          target: ${{ matrix.provider }}
+          target: agentcore
           platforms: linux/amd64
           push: true
-          build-args: |
-            OPENAB_BUILD_SHA=${{ needs.plan.outputs.sha12 }}
           tags: ${{ steps.tags.outputs.base_tags }}
           labels: |
             org.opencontainers.image.revision=${{ needs.plan.outputs.sha }}
@@ -242,6 +240,7 @@ jobs:
           push: true
           build-args: |
             BASE_IMAGE=${{ steps.tags.outputs.base }}
+            OPENAB_BUILD_SHA=${{ needs.plan.outputs.sha12 }}
             RUNTIME_PROVIDER=${{ steps.tags.outputs.variant }}
             RUNTIME_LOGIN_COMMAND=${{ steps.tags.outputs.login_command }}
             RUNTIME_AUTH_FILE=${{ steps.tags.outputs.auth_file }}

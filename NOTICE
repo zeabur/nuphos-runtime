@@ -29,12 +29,11 @@ Base layer (third_party/openab)
 Agent CLIs and ACP adapters
 ---------------------------
 
-  @anthropic-ai/claude-code    Proprietary   Anthropic Commercial Terms of
+  @anthropic-ai/claude-agent-sdk, including the Claude Code CLI it ships
+                               Proprietary   "SEE LICENSE IN LICENSE.md";
+                                             Anthropic Commercial Terms of
                                              Service. Not open source.
                                              https://www.anthropic.com/legal/commercial-terms
-  @anthropic-ai/claude-agent-sdk
-                               Proprietary   "SEE LICENSE IN LICENSE.md";
-                                             see the package for its terms.
   @anthropic-ai/sdk            MIT
   @agentclientprotocol/claude-agent-acp
                                Apache-2.0    https://github.com/agentclientprotocol/claude-agent-acp
@@ -49,14 +48,17 @@ Agent CLIs and ACP adapters
   are not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI.
 
 
-Command-line tools installed by image/Dockerfile
-------------------------------------------------
+Command-line tools
+------------------
 
-Each is downloaded at build time from its vendor's public distribution point
-and is governed by that vendor's licence. Refer to each project for the
-authoritative terms.
+Listed in image/tools/manifest.json. kubectl and the Zeabur CLI are downloaded
+at build time and included in the images. The others are not in the images:
+the runtime downloads each from its vendor's public distribution point the
+first time it is used. Each is governed by its vendor's licence. Refer to each
+project for the authoritative terms.
 
   kubectl                      Apache-2.0    https://github.com/kubernetes/kubernetes
+  Zeabur CLI                   See https://zeabur.com for terms.
   Helm                         Apache-2.0    https://github.com/helm/helm
   AWS CLI v2                   Apache-2.0    https://github.com/aws/aws-cli
   Google Cloud CLI             Apache-2.0 and other terms; portions are
@@ -68,11 +70,12 @@ authoritative terms.
   Aliyun CLI                   Apache-2.0    https://github.com/aliyun/aliyun-cli
   Volcengine CLI               Apache-2.0    https://github.com/volcengine/volcengine-cli
   linode-cli                   BSD-3-Clause  https://github.com/linode/linode-cli
-  Zeabur CLI                   See https://zeabur.com for terms.
+  PostgreSQL client, MariaDB client, GCC and binutils
+                               Debian packages, each under its own licence.
 
-  Debian packages installed with apt (git, python3, build-essential,
-  postgresql-client, mariadb-client and their dependencies) remain under their
-  own licences; see /usr/share/doc in the image.
+  Debian packages installed with apt (git, python3, gh and their
+  dependencies) remain under their own licences; see /usr/share/doc in the
+  image.
 
 
 TRADEMARKS
