@@ -20,9 +20,10 @@ Three things, in layers:
    supervises the agent, and keeps sessions alive across agent restarts. A
    short start script prepares the container and then becomes openab.
 2. **The agent CLI and its ACP adapter.** For `claude-code`, that is
-   `@anthropic-ai/claude-code` with `@agentclientprotocol/claude-agent-acp`;
-   for `codex`, `@openai/codex` with `@agentclientprotocol/codex-acp`. The
-   adapter translates ACP into whatever the CLI actually speaks.
+   `@agentclientprotocol/claude-agent-acp` with the Claude Code CLI that ships
+   inside the Claude Agent SDK; for `codex`, `@openai/codex` with
+   `@agentclientprotocol/codex-acp`. The adapter translates ACP into whatever
+   the CLI actually speaks. Each image carries exactly one copy of each.
 3. **The Nuphos toolset layer**, built from [`image/`](image) in this
    repository: a set of patches to the adapters, a handful of helper programs,
    and the command-line tools an agent is expected to be able to reach for.
@@ -48,13 +49,49 @@ until someone re-reviews the patch.
 | `/usr/local/bin/nuphos-sync-skills` | Fetches the workspace's skill bundle and swaps it in atomically — pushed by the provisioner for a managed pod, run per session by `runtime-defaults.mjs` for a self-hosted one |
 | `/usr/local/bin/nuphos-seed-codex-auth` | Seeds Codex credentials from a mounted secret, once per credential revision |
 
-Both adapter directories are ahead of the base image's globally installed
-copies on `PATH`, so `OPENAB_AGENT_COMMAND` resolves to the patched build.
+`OPENAB_AGENT_COMMAND` names the patched adapter, and `claude` on `PATH` is the
+same native CLI the Claude adapter runs.
 
-The layer also installs `git`, `python3`, `build-essential`, database clients,
-and the cloud CLIs `kubectl`, `helm`, `aws`, `gcloud`, `tailscale`, `mongosh`,
-`hcloud`, `aliyun`, `ve`, `linode-cli` and `zeabur` — the tools Nuphos skills
-assume are present.
+### Command-line tools
+
+The image ships only what the agent loop and the skills use on every turn:
+`git`, `gh`, `jq`, `ripgrep`, `curl`, `python3` (with `venv`), `kubectl` and
+`zeabur`. Every other tool a skill may reach for is a small shim on `PATH` that
+installs the pinned release the first time it runs and then hands over to it, so
+`aws s3 ls` works as it always did — the first call just takes longer and needs
+network access.
+
+| Tool | Commands |
+| --- | --- |
+| AWS CLI v2 | `aws` |
+| Google Cloud CLI | `gcloud`, `gsutil`, `bq`, and `gke-gcloud-auth-plugin` |
+| mongosh | `mongosh` |
+| PostgreSQL 17 client | `psql`, `pg_dump`, `pg_dumpall`, `pg_restore`, `pg_isready` |
+| MariaDB client | `mariadb`/`mysql`, `mariadb-dump`/`mysqldump`, `mariadb-admin`/`mysqladmin` |
+| Hetzner, Volcengine, Aliyun, Linode | `hcloud`, `ve`, `aliyun`, `linode-cli` |
+| Helm, Tailscale | `helm`, `tailscale`, `tailscaled` |
+| C/C++ toolchain | `gcc`, `g++`, `cc`, `c++`, `make`, binutils |
+
+Versions, download URLs and SHA-256 checksums are pinned in
+[`image/tools/manifest.json`](image/tools/manifest.json); a download that does not
+match is discarded. The Debian packages (the database clients and the toolchain)
+are fetched with `apt-get` as the unprivileged user and verified against the
+archive's signatures, then unpacked rather than installed. `nuphos-tools list`
+shows what is installed, and `nuphos-tools install <tool>` (or `--all`) fetches
+ahead of time.
+
+Tools install under `/home/node/.nuphos-runtime/tools` (override with
+`NUPHOS_TOOLS_DIR`), so they last exactly as long as the home directory does:
+
+- **Nuphos-provisioned pods** mount a persistent volume at `/home/node`, so a
+  tool is fetched once per runtime and survives restarts and image upgrades. An
+  image that pins a newer version installs it on first use and removes the old one.
+- **A self-hosted container** keeps them across restarts only with a volume at
+  `/home/node` (see [Running one](#running-one)). Without one, each new container
+  fetches a tool again the first time it is used.
+
+Concurrent first calls wait on a per-tool lock, so a tool is only ever fetched
+once. Progress goes to stderr; stdout stays the tool's own.
 
 Everything runs as uid/gid 1000 (`node`) with all capabilities dropped. Nothing
 in the image requires root at runtime.
@@ -67,30 +104,32 @@ over ACP, or fetched at startup. An image is the same for every workspace.
 
 ## Building
 
-Two layers, in order. The base comes from the `openab` submodule; the toolset
-layer is built on top of it and requires `BASE_IMAGE` to be set — there is no
+Two builds, in order. The base is the gateway, built from the `openab`
+submodule; the runtime image takes only the `openab` binary from it and builds
+everything else on `node:22-trixie-slim`. `BASE_IMAGE` must be set — there is no
 default, so nothing bakes a registry path into the published image.
 
 ```sh
 git clone --recurse-submodules https://github.com/zeabur/nuphos-runtime.git
 cd nuphos-runtime
 
-docker build -f third_party/openab/Dockerfile.unified --target codex \
-  --build-arg OPENAB_BUILD_SHA=$(git -C third_party/openab rev-parse --short=12 HEAD) \
-  -t openab-codex-base:local third_party/openab
+docker build -f third_party/openab/Dockerfile.unified --target agentcore \
+  -t openab-base:local third_party/openab
 
 docker build -f image/Dockerfile \
-  --build-arg BASE_IMAGE=openab-codex-base:local \
+  --build-arg BASE_IMAGE=openab-base:local \
+  --build-arg OPENAB_BUILD_SHA=$(git -C third_party/openab rev-parse --short=12 HEAD) \
   --build-arg RUNTIME_PROVIDER=codex \
   -t nuphos-runtime-codex:local image
 ```
 
-For the Claude Code runtime use `--target claude` and
-`RUNTIME_PROVIDER=claude-code`.
+For the Claude Code runtime use `RUNTIME_PROVIDER=claude-code`. Any image built
+from `Dockerfile.unified` works as `BASE_IMAGE`, including a published
+`X.Y.Z-base-<provider>` tag.
 
-Rebuilding the toolset layer alone does not pick up a change to the gateway:
-the `openab` binary lives in the base layer, so moving the submodule pointer
-only reaches users through a rebuild of both.
+Rebuilding the runtime image alone does not pick up a change to the gateway:
+the `openab` binary comes from the base, so moving the submodule pointer only
+reaches users through a rebuild of both.
 
 ## Running one
 
@@ -134,8 +173,8 @@ travels in a WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot.
 either source, stops the container at startup with an error.
 
 The volume also keeps the account the runtime signs in with
-(`/home/node/.claude` for Claude Code, `/home/node/.codex` for Codex) across
-container replacement.
+(`/home/node/.claude` for Claude Code, `/home/node/.codex` for Codex) and the
+command-line tools it installs on first use across container replacement.
 
 ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
 **`wss://`** — put TLS in front of the port. Most hosts terminate TLS for you
@@ -173,7 +212,7 @@ client asks for and otherwise runs the agent in `$HOME`, where the team's skills
 never land. Anything sized to a particular deployment, such as
 `[pool]` capacity or per-tool memory ceilings, is left to whoever knows the
 container's limits. The agent command itself is not pinned there: it stays on
-`OPENAB_AGENT_COMMAND`, which each variant's base image sets. See
+`OPENAB_AGENT_COMMAND`, which each variant's image sets. See
 [OpenAB's documentation](https://github.com/openabdev/openab) for the rest of
 `config.toml`.
 
@@ -286,8 +325,8 @@ Each release publishes four tags per provider:
 | --- | --- | --- |
 | Runtime | `X.Y.Z-claude-code` | `<openab-sha12>-claude-code` |
 | Runtime | `X.Y.Z-codex` | `<openab-sha12>-codex` |
-| Base | `X.Y.Z-base-claude-code` | `<openab-sha12>-base-claude-code` |
-| Base | `X.Y.Z-base-codex` | `<openab-sha12>-base-codex` |
+| Base (gateway only) | `X.Y.Z-base-claude-code` | `<openab-sha12>-base-claude-code` |
+| Base (gateway only) | `X.Y.Z-base-codex` | `<openab-sha12>-base-codex` |
 
 The revision tag names the `openab` commit the image was built from, so a
 running container maps back to a gateway revision. Both tags point at the same
@@ -312,8 +351,8 @@ is published here.
 [`zeabur/openab`](https://github.com/zeabur/openab) is a fork of
 [`openabdev/openab`](https://github.com/openabdev/openab), carried here as the
 `third_party/openab` submodule and pinned to an exact commit. It supplies the
-gateway binary and `Dockerfile.unified`, which builds the per-agent base
-targets. This repository adds the Nuphos layer on top and owns the published
+gateway binary and `Dockerfile.unified`, whose `agentcore` target is the
+base the runtime image takes it from. This repository adds the Nuphos layer on top and owns the published
 images. Fixes to the gateway or the ACP pool belong upstream or in the fork,
 not here.
 
@@ -331,9 +370,10 @@ npm ci --ignore-scripts --prefix image/codex-acp
 node test/codex-acp-smoke.mjs image/codex-acp/node_modules/@agentclientprotocol/codex-acp/dist/index.js
 ```
 
-CI runs all of them on every pull request, and builds the toolset layer. The
-provider base is a Rust build of the gateway, so it is built only when an image
-is published.
+CI runs all of them on every pull request, builds both runtime images on a
+published gateway base, and smoke-tests them, including a first-use install of
+an archive tool, a Debian-package tool and the C toolchain. The gateway base is
+a Rust build, so it is built only when an image is published.
 
 ## Licence
 

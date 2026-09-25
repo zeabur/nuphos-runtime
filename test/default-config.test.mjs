@@ -22,7 +22,7 @@ test('every published variant boots without a mounted config', () => {
   }
 })
 
-test('the default never shadows the agent command the base image bakes', () => {
+test('the default never shadows the agent command the image bakes', () => {
   // command is resolved from OPENAB_AGENT_COMMAND only while the file omits
   // it; a value here would pin the wrong adapter for a variant forever.
   for (const [variant, config] of configs) {
