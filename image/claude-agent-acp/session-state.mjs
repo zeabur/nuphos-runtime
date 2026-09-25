@@ -8,18 +8,15 @@ function nuphosSessionState(session) {
     if (session.nuphosSdkWedged) return "idle";
     return session.lastSessionState === undefined || session.lastSessionState === "idle" ? "idle" : "active";
 }
-function nuphosSessionStateUpdate(sessionId, session) {
-    return {
-        sessionId,
-        update: { sessionUpdate: "session_info_update", _meta: {
-            "ai.nuphos/sessionState": { state: nuphosSessionState(session) }
-        }}
-    };
-}
 async function publishNuphosSessionState(agent, sessionId, session) {
     if (agent.sessions[sessionId] !== session) return;
     try {
-        await agent.client.sessionUpdate(nuphosSessionStateUpdate(sessionId, session));
+        await agent.client.sessionUpdate({
+            sessionId,
+            update: { sessionUpdate: "session_info_update", _meta: {
+                "ai.nuphos/sessionState": { state: nuphosSessionState(session) }
+            }}
+        });
     }
     catch (error) {
         agent.logger.error("Could not publish runtime session state", error);
@@ -39,7 +36,7 @@ export function patchClaudeSessionState(source) {
     source,
     stateAnchor,
     `
-                                await sendUpdate(nuphosSessionStateUpdate(params.sessionId, session));
+                                await publishNuphosSessionState(this, params.sessionId, session);
                                 if (message.state === "idle") await session.titles.onTurnEnd(session);
 ${stateAnchor}`,
     'session-state lifecycle handoff',
