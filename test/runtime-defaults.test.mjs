@@ -121,7 +121,8 @@ test('patch wraps only native session creation and leaves loads and session isol
 class Agent {
     async newSession(params) { return { sessionId: params.id, configOptions: [{ id: 'model', currentValue: 'a', options: [{ value: 'a' }, { value: 'b' }] }] }; }
     async setSessionConfigOption(params) { return { configOptions: [{ id: 'model', currentValue: params.value, options: [{ value: 'a' }, { value: 'b' }] }] }; }
-    async loadSession() { return 'loaded without applying defaults'; }
+    async loadSession(params) { return 'loaded without applying defaults'; }
+    async resumeSession(params) { return 'resumed without applying defaults'; }
   }`
   const patched = `${patchRuntimeDefaults(source)}\nexport { Agent }`
   const module = await import(`data:text/javascript,${encodeURIComponent(patched)}`)
@@ -134,6 +135,10 @@ class Agent {
   assert.equal(
     await agent.loadSession(params({ model: 'invalid' })),
     'loaded without applying defaults',
+  )
+  assert.equal(
+    await agent.resumeSession(params({ model: 'invalid' })),
+    'resumed without applying defaults',
   )
   assert.throws(() => patchRuntimeDefaults('unexpected adapter'), /exactly one/)
 })

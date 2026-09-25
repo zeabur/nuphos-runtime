@@ -124,29 +124,56 @@ test('a failing or hanging sync never stops the conversation', async () => {
   )
 })
 
-test('the sync rides the one session/new patch and still applies defaults', async () => {
+test('session/new, session/load and session/resume all sync, and only new applies defaults', async () => {
   const source = `#!/usr/bin/env node
 class Agent {
     async newSession(params) { return { sessionId: params.id, configOptions: [{ id: 'model', currentValue: 'a', options: [{ value: 'a' }, { value: 'b' }] }] }; }
     async setSessionConfigOption(params) { return { configOptions: [{ id: 'model', currentValue: params.value, options: [{ value: 'a' }, { value: 'b' }] }] }; }
-    async loadSession() { return 'loaded without syncing'; }
+    async loadSession(params) { return 'loaded'; }
+    async resumeSession(params) { return 'resumed'; }
   }`
-  const patched = `${patchRuntimeDefaults(source)}\nexport { Agent }`
+  const patched = patchRuntimeDefaults(source)
 
-  // Both helpers must be serialized into the adapter, or the patched handler throws
-  // at the first session instead of syncing.
   assert.ok(patched.includes('async function nuphosSyncRuntimeSkills'))
-  assert.ok(patched.includes('await nuphosSyncRuntimeSkills(params);'))
-  assert.equal(patched.split('async newSession(params) {').length, 2)
+  assert.equal(patched.split('await nuphosSyncRuntimeSkills(params);').length, 4)
+  for (const handler of ['newSession', 'loadSession', 'resumeSession'])
+    assert.equal(patched.split(`async ${handler}(params) {`).length, 2)
+  for (const handler of ['loadSession', 'resumeSession'])
+    assert.throws(
+      () => patchRuntimeDefaults(source.replace(`async ${handler}(params) {`, '')),
+      /exactly one/,
+    )
 
-  const module = await import(`data:text/javascript,${encodeURIComponent(patched)}`)
-  const agent = new module.Agent()
-  const session = await agent.newSession({
-    id: 'a',
-    _meta: { 'ai.nuphos/runtimeDefaults': { model: 'b' } },
+  // The patched call hands the child nothing but the bundle credential, so the fake
+  // script records into a path written into its own body.
+  await withFakeScript('', async ({ record, script }) => {
+    await writeFile(script, `#!/bin/sh\necho "$NUPHOS_RUNTIME_SKILLS_URL" >> '${record}'\n`)
+    const module = await import(
+      `data:text/javascript,${encodeURIComponent(
+        `${patched.replace("'/usr/local/bin/nuphos-sync-skills'", JSON.stringify(script))}\nexport { Agent }`,
+      )}`
+    )
+    const agent = new module.Agent()
+    const carrying = (url) =>
+      meta({ NUPHOS_RUNTIME_SKILLS_URL: url, NUPHOS_RUNTIME_SKILLS_TOKEN: 't' })
+
+    const session = await agent.newSession({
+      id: 'a',
+      _meta: { ...carrying('https://new')._meta, 'ai.nuphos/runtimeDefaults': { model: 'b' } },
+    })
+    assert.equal(session.configOptions[0].currentValue, 'b')
+    assert.equal(await agent.loadSession({ sessionId: 'a', ...carrying('https://load') }), 'loaded')
+    assert.equal(
+      await agent.resumeSession({ sessionId: 'a', ...carrying('https://resume') }),
+      'resumed',
+    )
+    // A reopen without a credential, as on a managed pod, stays untouched.
+    assert.equal(await agent.loadSession({ sessionId: 'a' }), 'loaded')
+
+    assert.deepEqual((await readFile(record, 'utf8')).split('\n').filter(Boolean), [
+      'https://new',
+      'https://load',
+      'https://resume',
+    ])
   })
-
-  // No credential in this session, so the sync is a no-op and defaults still applied.
-  assert.equal(session.configOptions[0].currentValue, 'b')
-  assert.equal(await agent.loadSession({}), 'loaded without syncing')
 })
