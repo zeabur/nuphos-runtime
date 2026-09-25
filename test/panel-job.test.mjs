@@ -94,7 +94,7 @@ test('the image lists the job for OpenAB with a 300s ceiling and ships the scrip
 
   assert.match(
     dockerfile,
-    /^ENV OPENAB_RUNTIME_JOBS="panel=node --max-old-space-size=512 \/opt\/nuphos-runtime\/panel-job\.mjs" \\$/mu,
+    /^ENV OPENAB_RUNTIME_JOBS="panel=node --max-old-space-size=512 \/opt\/nuphos-runtime\/panel-job\.mjs;/mu,
   )
   assert.match(dockerfile, /^ {4}OPENAB_RUNTIME_JOB_MAX_TIMEOUT_MS=300000$/mu)
   assert.match(dockerfile, /^COPY [^\n]*panel-job\.mjs \/opt\/nuphos-runtime\/$/mu)

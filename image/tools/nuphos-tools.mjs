@@ -338,20 +338,36 @@ function lstatSafe(path) {
   }
 }
 
-function list(manifest, root) {
-  for (const [name, tool] of Object.entries(manifest)) {
-    const state = tool.baked
-      ? 'built in'
+export function toolStates(manifest, root) {
+  return Object.entries(manifest).map(([name, tool]) => ({
+    name,
+    version: tool.version,
+    state: tool.baked
+      ? 'built-in'
       : existsSync(join(toolDir(root, name, tool), '.bin'))
         ? 'installed'
-        : 'on first use'
+        : 'on-first-use',
+    commands: Object.keys(tool.commands),
+  }))
+}
+
+const STATE_LABELS = { 'built-in': 'built in', installed: 'installed', 'on-first-use': 'on first use' }
+
+function list(manifest, root, json) {
+  const tools = toolStates(manifest, root)
+  if (json) {
+    const entries = tools.map((tool) => ({ ...tool, installed: tool.state !== 'on-first-use' }))
+    process.stdout.write(`${JSON.stringify({ tools: entries })}\n`)
+    return
+  }
+  for (const { name, version, state, commands } of tools) {
     process.stdout.write(
-      `${name.padEnd(24)}${tool.version.padEnd(12)}${state.padEnd(14)}${Object.keys(tool.commands).join(' ')}\n`,
+      `${name.padEnd(24)}${version.padEnd(12)}${STATE_LABELS[state].padEnd(14)}${commands.join(' ')}\n`,
     )
   }
 }
 
-const USAGE = `usage: nuphos-tools list
+const USAGE = `usage: nuphos-tools list [--json]
        nuphos-tools install <tool>... | --all
 
 Tools not built into the image install into ${DEFAULT_ROOT}
@@ -373,7 +389,7 @@ function main(argv) {
 
   switch (command) {
     case 'list':
-      list(manifest, root)
+      list(manifest, root, rest.includes('--json'))
       return 0
     case 'install': {
       const names = pick(rest)
