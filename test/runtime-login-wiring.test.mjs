@@ -7,6 +7,10 @@ const build = readFileSync(new URL('../.github/workflows/build.yml', import.meta
 
 const LOGIN_COMMAND = 'node /opt/nuphos-runtime/codex-login.mjs --install'
 const AUTH_FILE = '/home/node/.codex/auth.json'
+const CLAUDE_LOGIN_COMMAND = 'node /opt/nuphos-runtime/claude-login.mjs'
+// Where Claude Code on Linux keeps the login `claude auth login` or `/login` stores, and
+// where the agent reads it from when no CLAUDE_CODE_OAUTH_TOKEN is set.
+const CLAUDE_AUTH_FILE = '/home/node/.claude/.credentials.json'
 
 test('the image hands OpenAB the sign-in command and the credential path', () => {
   assert.match(dockerfile, /^ARG RUNTIME_LOGIN_COMMAND$/mu)
@@ -15,14 +19,12 @@ test('the image hands OpenAB the sign-in command and the credential path', () =>
   assert.match(dockerfile, /^ {4}OPENAB_RUNTIME_AUTH_FILE="\$\{RUNTIME_AUTH_FILE\}"$/mu)
 })
 
-test('the published Codex image carries both values and the Claude Code image carries neither', () => {
+test('each published image signs itself in and reports its own credential file', () => {
   assert.ok(build.includes(`LOGIN_COMMAND='${LOGIN_COMMAND}'`))
   assert.ok(build.includes(`AUTH_FILE='${AUTH_FILE}'`))
-  // An empty `OPENAB_RUNTIME_AUTH_FILE` is what makes `_openab/runtime/state` answer
-  // "cannot tell" instead of "signed out". A Claude Code account arrives with the
-  // session, so claiming it is absent would report every working runtime as signed out.
-  assert.ok(build.includes("LOGIN_COMMAND=''"))
-  assert.ok(build.includes("AUTH_FILE=''"))
+  assert.ok(build.includes(`LOGIN_COMMAND='${CLAUDE_LOGIN_COMMAND}'`))
+  assert.ok(build.includes(`AUTH_FILE='${CLAUDE_AUTH_FILE}'`))
+  assert.ok(!build.includes("AUTH_FILE=''"))
   assert.ok(build.includes('RUNTIME_LOGIN_COMMAND=${{ steps.tags.outputs.login_command }}'))
   assert.ok(build.includes('RUNTIME_AUTH_FILE=${{ steps.tags.outputs.auth_file }}'))
 })
@@ -81,4 +83,13 @@ test('the sign-in command names the flag that keeps the credential in the contai
   const login = readFileSync(new URL('../image/codex-login.mjs', import.meta.url), 'utf8')
 
   assert.ok(login.includes("process.argv.includes('--install')"))
+})
+
+test('the Claude Code sign-in helper ships in the image and writes where the agent reads', () => {
+  assert.match(dockerfile, /^COPY codex-login\.mjs claude-login\.mjs /mu)
+  assert.match(dockerfile, /test -r \/opt\/nuphos-runtime\/claude-login\.mjs/u)
+  const login = readFileSync(new URL('../image/claude-login.mjs', import.meta.url), 'utf8')
+
+  assert.ok(login.includes("join(home, '.claude', '.credentials.json')"))
+  assert.ok(CLAUDE_AUTH_FILE.startsWith('/home/node/'))
 })

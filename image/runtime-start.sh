@@ -79,6 +79,12 @@ if [ -n "${OPENAB_ACP_AUTH_KEY:-}" ]; then
   fi
 fi
 
+# A token in the environment outranks any stored login, so a sign-in would change
+# nothing and the credential file says nothing about the account in use.
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  export OPENAB_RUNTIME_LOGIN_COMMAND= OPENAB_RUNTIME_AUTH_FILE=
+fi
+
 # The workspace layout a provisioned pod's init container builds, so a self-hosted
 # runtime's skills land where each agent reads them. Idempotent, and never fatal: a
 # workspace that is not writable still lets the runtime chat.
