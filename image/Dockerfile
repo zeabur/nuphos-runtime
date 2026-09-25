@@ -36,11 +36,12 @@ COPY --chmod=755 seed-codex-auth.sh /usr/local/bin/nuphos-seed-codex-auth
 COPY runtime-defaults.mjs mcp-bridge-config.mjs /opt/
 # Sourced via BASH_ENV, so it is read, never executed.
 COPY --chmod=644 runtime-guard.sh /opt/nuphos-runtime/runtime-guard.sh
-COPY codex-login.mjs mcp-http-bridge.mjs panel-job.mjs /opt/nuphos-runtime/
+COPY codex-login.mjs claude-login.mjs mcp-http-bridge.mjs panel-job.mjs /opt/nuphos-runtime/
 # COPY --chmod also affects newly created destination directories.
 # Runtime helpers must be traversable by the non-root init and agent containers.
 RUN chmod 755 /opt/nuphos-runtime \
  && chmod 644 /opt/nuphos-runtime/runtime-guard.sh /opt/nuphos-runtime/codex-login.mjs \
+      /opt/nuphos-runtime/claude-login.mjs \
       /opt/nuphos-runtime/mcp-http-bridge.mjs /opt/nuphos-runtime/panel-job.mjs
 
 # Pin the SDK used by the adapter so the model picker lists current models and
@@ -83,11 +84,10 @@ ENV OPENAB_ACP_ENABLED=true \
     OPENAB_ACP_STREAMING=true \
     GATEWAY_ALLOWED_USERS=acp_client
 
-# What `_openab/runtime/login` runs, and where the credential it produces lands. Both are
-# empty unless the build supplies them, because only Codex keeps its credential in a file:
-# a Claude Code account arrives with the session, so this image must report "cannot tell"
-# rather than "signed out" for it. Dockerfile `ENV` cannot branch on `RUNTIME_PROVIDER`,
-# so the caller selects the values — see the README for the Codex pair.
+# What `_openab/runtime/login` runs, and where the credential it produces lands. Empty
+# unless the build supplies them, which makes the runtime report "cannot tell" rather
+# than "signed out". Dockerfile `ENV` cannot branch on `RUNTIME_PROVIDER`, so the caller
+# selects the pair — see the README.
 ARG RUNTIME_LOGIN_COMMAND
 ARG RUNTIME_AUTH_FILE
 ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
@@ -211,6 +211,7 @@ RUN test -x /opt/nuphos-runtime \
  && test -r /opt/nuphos-runtime/mcp-http-bridge.mjs \
  && test -r /opt/nuphos-runtime/runtime-guard.sh \
  && test -r /opt/nuphos-runtime/codex-login.mjs \
+ && test -r /opt/nuphos-runtime/claude-login.mjs \
  && test -r /opt/nuphos-runtime/panel-job.mjs \
  && test -r /etc/openab/config.toml \
  && test -x /usr/local/bin/nuphos-runtime-start \

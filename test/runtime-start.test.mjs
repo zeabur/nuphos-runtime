@@ -219,6 +219,28 @@ test('the password never reaches argv or the output', () => {
   assert.doesNotMatch(readFileSync(startScript, 'utf8'), /node -e[^\n]*\$OPENAB_ACP_AUTH_KEY/u)
 })
 
+test('a token in the environment turns off sign-in and its status, and nothing else does', () => {
+  const baked = {
+    OPENAB_RUNTIME_LOGIN_COMMAND: 'node /opt/nuphos-runtime/claude-login.mjs',
+    OPENAB_RUNTIME_AUTH_FILE: '/home/node/.claude/.credentials.json',
+  }
+
+  // The token outranks the stored login, so reporting the file would describe an
+  // account the agent does not use — and a provisioned pod always has one.
+  const withToken = start({ ...baked, CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-operator' }).env
+
+  assert.equal(withToken.OPENAB_RUNTIME_LOGIN_COMMAND, '')
+  assert.equal(withToken.OPENAB_RUNTIME_AUTH_FILE, '')
+  assert.equal(withToken.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat01-operator')
+
+  for (const env of [baked, { ...baked, CLAUDE_CODE_OAUTH_TOKEN: '' }]) {
+    const started = start(env).env
+
+    assert.equal(started.OPENAB_RUNTIME_LOGIN_COMMAND, baked.OPENAB_RUNTIME_LOGIN_COMMAND)
+    assert.equal(started.OPENAB_RUNTIME_AUTH_FILE, baked.OPENAB_RUNTIME_AUTH_FILE)
+  }
+})
+
 test('the workspace is laid out the way a provisioned pod lays it out', () => {
   const { workspace } = start({ OPENAB_ACP_AUTH_KEY: VECTORS[0][0] })
 

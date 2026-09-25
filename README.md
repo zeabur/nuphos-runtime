@@ -44,6 +44,7 @@ until someone re-reviews the patch.
 | `/opt/nuphos-runtime/runtime-guard.sh` | Sourced via `BASH_ENV`; refreshes per-turn credentials into the shell environment and sets a memory ceiling |
 | `/opt/nuphos-runtime/panel-job.mjs` | The `panel` job OpenAB runs for `_openab/runtime/job`: writes the panel runner, script and params into a fresh directory and runs `node runner.mjs <dir>`, passing stdout and the exit code through |
 | `/opt/nuphos-runtime/codex-login.mjs` | Drives Codex's device-code login in an isolated `CODEX_HOME` |
+| `/opt/nuphos-runtime/claude-login.mjs` | Drives `claude auth login`: reports the authorize URL, passes back the code the user pastes, and leaves the credential in `~/.claude` |
 | `/usr/local/bin/nuphos-sync-skills` | Fetches the workspace's skill bundle and swaps it in atomically — pushed by the provisioner for a managed pod, run per session by `runtime-defaults.mjs` for a self-hosted one |
 | `/usr/local/bin/nuphos-seed-codex-auth` | Seeds Codex credentials from a mounted secret, once per credential revision |
 
@@ -132,8 +133,9 @@ travels in a WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot.
 `openssl rand -hex 32` always qualifies. A password under 32 characters, from
 either source, stops the container at startup with an error.
 
-The volume also keeps whatever else the runtime holds across container
-replacement — for Codex, the account it signs in with.
+The volume also keeps the account the runtime signs in with
+(`/home/node/.claude` for Claude Code, `/home/node/.codex` for Codex) across
+container replacement.
 
 ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
 **`wss://`** — put TLS in front of the port. Most hosts terminate TLS for you
@@ -177,14 +179,22 @@ container's limits. The agent command itself is not pinned there: it stays on
 
 ### What each provider needs beyond the password
 
-| Variant | Provider account |
-| --- | --- |
-| `claude-code` | Nothing to supply. Nuphos delivers the account over the ACP session once the runtime is registered. |
-| `codex` | A one-time device sign-in, driven from the app once the runtime is registered — see below. `docker exec -it nuphos-runtime codex login --device-auth` still works if you would rather do it on the host. |
+Each runtime owns its own login. Nuphos never stores the account and never sends
+one to a runtime it did not provision; it only shows what the runtime reports.
 
-Codex credentials land in `$HOME/.codex`, which is lost when the container is
-replaced; mount a volume at `/home/node` to keep them. A Claude Code runtime
-needs no volume, because it holds no credential of its own.
+| Variant | Sign in on the host | Credential |
+| --- | --- | --- |
+| `claude-code` | `docker exec -it nuphos-runtime claude auth login` (or run `claude` and use `/login`) | `/home/node/.claude/.credentials.json` |
+| `codex` | `docker exec -it nuphos-runtime codex login --device-auth` | `/home/node/.codex/auth.json` |
+
+You can also sign in from the app once the runtime is connected (see below). Either
+way the credential is written inside the container, so mount the `/home/node` volume
+from the quick start to keep it.
+
+For Claude Code there is a third option: set `CLAUDE_CODE_OAUTH_TOKEN` on the
+container yourself, for example to a token from `claude setup-token`. That token
+takes precedence over any stored login, so the runtime then turns off sign-in from
+the app and does not report a sign-in state.
 
 ### Connecting it to Nuphos
 
@@ -226,26 +236,40 @@ key, so a runtime connected with only its password gets no status and no Codex
 sign-in, and none create `/workspace`, so skills never land. Moving to 0.0.7 needs
 no change to how the runtime is connected.
 
-### Signing Codex in from the app
+#### Upgrading a Claude Code runtime from 0.0.12 or earlier
 
-Once a Codex runtime is connected, press **Sign in** on its card. The app runs
-Codex's device flow inside the container and shows you the code, instead of you
-finding a shell on the host. The credential the flow mints stays in the container:
-only the device code and the verification link cross the wire, and the runtime
-reports afterwards whether it holds a credential, so the card stops asking. Keep
-the `/home/node` volume from the quick start, or the sign-in is lost with the
-container.
+Nuphos used to store a pasted Claude Code token and send it with every session. It
+no longer does. Before upgrading Nuphos, sign the runtime in with one of the options
+above, or its sessions will fail with "sign in required".
 
-The published Codex image carries the two settings that enable this — the sign-in
-command and the path it writes. A hand-built Codex image must pass them itself:
+### Signing in from the app
+
+Once a runtime is connected, press **Sign in** on its card. The app runs the
+provider's own sign-in inside the container, so you don't need a shell on the host:
+
+- **Codex:** the app shows a device code to enter on the ChatGPT page.
+- **Claude Code:** the app opens Claude's sign-in page. After you approve, that page
+  shows a code; paste it into the app. The code reaches `claude auth login` in the
+  container through the operator channel (`_openab/runtime/login/input`).
+
+The credential the flow creates stays in the container. Only the device code, the
+authorize link, and the pasted code cross the wire. Afterwards the runtime reports
+whether it holds a credential, so the card stops asking. Keep the `/home/node`
+volume, or the sign-in is lost with the container. Claude Code sign-in from the app
+needs an `openab` gateway that relays input; with an older gateway the app reports
+that and you sign in on the host instead.
+
+The published images carry the two settings that enable this: the sign-in command
+and the credential path. A hand-built image has to pass them itself:
 
 ```sh
+# Codex
 --build-arg 'RUNTIME_LOGIN_COMMAND=node /opt/nuphos-runtime/codex-login.mjs --install' \
 --build-arg RUNTIME_AUTH_FILE=/home/node/.codex/auth.json
+# Claude Code
+--build-arg 'RUNTIME_LOGIN_COMMAND=node /opt/nuphos-runtime/claude-login.mjs' \
+--build-arg RUNTIME_AUTH_FILE=/home/node/.claude/.credentials.json
 ```
-
-A Claude Code image sets neither on purpose: its account arrives with the session,
-so there is no file to sign in to and none to report on.
 
 Self-hosting the rest of Nuphos is in progress and not documented here.
 

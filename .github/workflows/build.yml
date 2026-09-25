@@ -180,15 +180,14 @@ jobs:
           set -euo pipefail
           # The published variant name matches the backend's provider identifier.
           if [[ "$PROVIDER" == "codex" ]]; then VARIANT=codex; else VARIANT=claude-code; fi
-          # Only Codex has a device sign-in and a credential file; a Claude Code account
-          # arrives with the session, so its image leaves both unset on purpose.
+          # Each provider signs itself in and keeps the credential in its own home.
           if [[ "$VARIANT" == "codex" ]]; then
             LOGIN_COMMAND='node /opt/nuphos-runtime/codex-login.mjs --install'
             AUTH_FILE='/home/node/.codex/auth.json'
             LABEL='Codex'
           else
-            LOGIN_COMMAND=''
-            AUTH_FILE=''
+            LOGIN_COMMAND='node /opt/nuphos-runtime/claude-login.mjs'
+            AUTH_FILE='/home/node/.claude/.credentials.json'
             LABEL='Claude Code'
           fi
 
