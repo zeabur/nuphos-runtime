@@ -255,9 +255,9 @@ provider's own sign-in inside the container, so you don't need a shell on the ho
 The credential the flow creates stays in the container. Only the device code, the
 authorize link, and the pasted code cross the wire. Afterwards the runtime reports
 whether it holds a credential, so the card stops asking. Keep the `/home/node`
-volume, or the sign-in is lost with the container. Claude Code sign-in from the app
-needs an `openab` gateway that relays input; with an older gateway the app reports
-that and you sign in on the host instead.
+volume, or the sign-in is lost with the container. Claude Code images up to v0.0.12
+ship a gateway that cannot relay the pasted code; on those the app reports that and
+you sign in on the host instead.
 
 The published images carry the two settings that enable this: the sign-in command
 and the credential path. A hand-built image has to pass them itself:
