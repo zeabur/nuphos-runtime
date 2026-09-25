@@ -241,6 +241,60 @@ test('a token in the environment turns off sign-in and its status, and nothing e
   }
 })
 
+test('with the console on, a fresh volume gets no password and points at the setup page', () => {
+  const { env, stdout, keyFile, home } = start({ OPENAB_RUNTIME_CONSOLE: 'true' })
+
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, undefined)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, undefined)
+  assert.equal(env.OPENAB_RUNTIME_LEGACY_KEY_FILE, keyFile)
+  assert.equal(existsSync(join(home, '.nuphos-runtime')), false)
+  assert.match(stdout, /^Open this runtime's address in a browser to set its console password\. Setup stays open for 30 minutes/u)
+})
+
+test('with the console on, a stored password is left for openab to import, not exported', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  const [password] = VECTORS[1]
+  mkdirSync(join(home, '.nuphos-runtime'), { mode: 0o700 })
+  writeFileSync(join(home, '.nuphos-runtime/auth-key'), `${password}\n`, { mode: 0o600 })
+
+  const { env, stdout, keyFile } = start({ OPENAB_RUNTIME_CONSOLE: 'true' }, home)
+
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, undefined)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, undefined)
+  assert.equal(env.OPENAB_RUNTIME_LEGACY_KEY_FILE, keyFile)
+  assert.equal(stdout.includes(password), false)
+  assert.equal(readFileSync(keyFile, 'utf8').trim(), password)
+
+  writeFileSync(keyFile, 'short\n')
+  const tooShort = run({ OPENAB_RUNTIME_CONSOLE: 'true' }, home)
+
+  assert.notEqual(tooShort.result.status, 0)
+  assert.match(tooShort.result.stderr, /at least 32/u)
+})
+
+test('with the console on, NUPHOS_RUNTIME_AUTOGEN_PASSWORD keeps the generated password', () => {
+  const { env, stdout, keyFile } = start({
+    OPENAB_RUNTIME_CONSOLE: 'true',
+    NUPHOS_RUNTIME_AUTOGEN_PASSWORD: 'true',
+  })
+  const password = readFileSync(keyFile, 'utf8').trim()
+
+  assert.match(password, /^[0-9a-f]{64}$/u)
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+  assert.match(stdout, /^Generated runtime password/u)
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, undefined, 'openab imports it from the file')
+  assert.equal(env.OPENAB_RUNTIME_LEGACY_KEY_FILE, keyFile)
+})
+
+test('with the console on, a password in the environment still works as before', () => {
+  const [password, expected] = VECTORS[0]
+  const { env, stdout } = start({ OPENAB_RUNTIME_CONSOLE: 'true', OPENAB_ACP_AUTH_KEY: password })
+
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, password)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, expected)
+  assert.equal(stdout, '')
+})
+
 test('the workspace is laid out the way a provisioned pod lays it out', () => {
   const { workspace } = start({ OPENAB_ACP_AUTH_KEY: VECTORS[0][0] })
 
