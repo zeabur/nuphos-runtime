@@ -104,7 +104,7 @@ ENV OPENAB_BUILD_SHA="${OPENAB_BUILD_SHA}" \
     HOME=/home/node
 
 # What a Nuphos-provisioned pod has always set, which a self-hosted container had
-# to rediscover by hand. None of the three can move into config.toml — openab reads
+# to rediscover by hand. None of them can move into config.toml — openab reads
 # them only as environment.
 #
 # GATEWAY_ALLOWED_USERS is the gateway-wide L3 identity allowlist, not an ACP switch:
@@ -113,12 +113,17 @@ ENV OPENAB_BUILD_SHA="${OPENAB_BUILD_SHA}" \
 # An operator who also enables Discord, Slack or LINE must ADD their sender ids here
 # rather than drop the line, or those platforms are denied instead.
 #
-# openab will not mount /acp on a routable address without OPENAB_ACP_AUTH_KEY; the
-# entrypoint supplies one from the home volume when none is set. Override with =false.
+# The runtime console serves `GET /`: a fresh volume opens a setup page, and each
+# Nuphos team connects with its own revocable key through a pairing code. The console
+# keeps its state beside the tools on the home volume. Override with
+# OPENAB_RUNTIME_CONSOLE=false and a password in OPENAB_ACP_AUTH_KEY.
 ENV OPENAB_ACP_ENABLED=true \
     OPENAB_ACP_MCP_SERVERS=true \
     OPENAB_ACP_STREAMING=true \
-    GATEWAY_ALLOWED_USERS=acp_client
+    GATEWAY_ALLOWED_USERS=acp_client \
+    OPENAB_RUNTIME_CONSOLE=true \
+    OPENAB_RUNTIME_STATE_DIR=/home/node/.nuphos-runtime \
+    OPENAB_RUNTIME_CONNECT_URL_TEMPLATE="nuphos://connect-runtime?url={url}&code={code}&exp={exp}"
 
 # What `_openab/runtime/login` runs, and where the credential it produces lands. Empty
 # unless the build supplies them, which makes the runtime report "cannot tell" rather

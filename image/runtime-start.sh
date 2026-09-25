@@ -42,22 +42,46 @@ generate_password() {
     "$key_file" "$OPENAB_ACP_AUTH_KEY" "$key_file"
 }
 
-# One set in the environment wins; otherwise the runtime keeps its own on the home
-# volume, generated on first boot.
-if [ "${OPENAB_ACP_ENABLED:-}" = true ] || [ "${OPENAB_ACP_ENABLED:-}" = 1 ]; then
+enabled() {
+  [ "${1:-}" = true ] || [ "${1:-}" = 1 ]
+}
+
+# One set in the environment wins. With the runtime console on, openab owns the home
+# volume's credentials: it imports a password file left by an earlier version and
+# otherwise serves a setup page, so nothing is generated unless
+# NUPHOS_RUNTIME_AUTOGEN_PASSWORD asks for the old behaviour. With the console off, the
+# runtime keeps its own password on the home volume, generated on first boot.
+if enabled "${OPENAB_ACP_ENABLED:-}"; then
   default_key_file=/home/node/.nuphos-runtime/auth-key
   key_file=${OPENAB_ACP_AUTH_KEY_FILE:-$default_key_file}
   if [ -n "${OPENAB_ACP_AUTH_KEY:-}" ]; then
     check_password OPENAB_ACP_AUTH_KEY
-  elif [ -e "$key_file" ]; then
-    OPENAB_ACP_AUTH_KEY=$(tr -d '\r\n' < "$key_file") \
-      || fail "cannot read the runtime password from $key_file."
-    check_password "$key_file"
-    printf 'Using the runtime password from %s.\n' "$key_file"
+    export OPENAB_ACP_AUTH_KEY
+  elif enabled "${OPENAB_RUNTIME_CONSOLE:-}"; then
+    export OPENAB_RUNTIME_LEGACY_KEY_FILE="$key_file"
+    if [ -e "$key_file" ]; then
+      OPENAB_ACP_AUTH_KEY=$(tr -d '\r\n' < "$key_file") \
+        || fail "cannot read the runtime password from $key_file."
+      check_password "$key_file"
+      unset OPENAB_ACP_AUTH_KEY
+    elif enabled "${NUPHOS_RUNTIME_AUTOGEN_PASSWORD:-}"; then
+      generate_password
+      unset OPENAB_ACP_AUTH_KEY
+    else
+      printf 'Open this runtime'"'"'s address in a browser to set its console password. Setup stays open for %s minutes after each start.\n' \
+        "$(( ${OPENAB_RUNTIME_SETUP_WINDOW_SECS:-1800} / 60 ))"
+    fi
   else
-    generate_password
+    if [ -e "$key_file" ]; then
+      OPENAB_ACP_AUTH_KEY=$(tr -d '\r\n' < "$key_file") \
+        || fail "cannot read the runtime password from $key_file."
+      check_password "$key_file"
+      printf 'Using the runtime password from %s.\n' "$key_file"
+    else
+      generate_password
+    fi
+    export OPENAB_ACP_AUTH_KEY
   fi
-  export OPENAB_ACP_AUTH_KEY
 fi
 
 # Derive the operator key from the password unless one was set. Must match

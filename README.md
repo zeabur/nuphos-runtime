@@ -38,7 +38,7 @@ until someone re-reviews the patch.
 | --- | --- |
 | `/opt/nuphos-claude-agent-acp` | Claude adapter (0.74.0, Agent SDK 0.3.261), patched to publish session state and to bridge HTTP MCP servers |
 | `/opt/nuphos-codex-acp` | Codex adapter (1.1.4, Codex CLI 0.153.4), patched for per-session instructions and environment, MCP bridging, and steering an active turn |
-| `/usr/local/bin/nuphos-runtime-start` | The entrypoint: resolves the password (environment, else the stored one, else a new one), derives the operator key from it when none is set, lays out `/workspace` the way a provisioned pod does, then becomes openab |
+| `/usr/local/bin/nuphos-runtime-start` | The entrypoint: checks a password set in the environment and derives the operator key from it, points openab's console at a password file from an earlier version, lays out `/workspace` the way a provisioned pod does, then becomes openab |
 | `/etc/openab/config.toml` | The gateway config openab reads, so the container starts with nothing mounted; a mount at this path replaces it |
 | `/opt/runtime-defaults.mjs` | Applies a model, reasoning effort and fast-mode default to a new session |
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
@@ -143,34 +143,56 @@ docker run -d --name nuphos-runtime -p 8080:8080 \
 
 Use `0.0.12-claude-code` for a Claude Code runtime.
 
-On first boot the runtime generates its admin password, stores it in
-`/home/node/.nuphos-runtime/auth-key` (mode `0600`), and prints it once:
+Then open its base URL in a browser (`http://<host>:8080/`, or its `https://`
+address once TLS is in front). A fresh volume shows a setup page: choose a console
+password of 12 characters or more, or let the runtime generate one. A generated
+password is shown once and also written to the container log; one you choose is
+never logged. Setup stays open for 30 minutes after each start
+(`OPENAB_RUNTIME_SETUP_WINDOW_SECS`); after that the page asks you to restart the
+container to reopen it. Set the password right after deploying, because until then
+whoever opens the page first chooses it.
 
-```text
-Generated runtime password (stored in /home/node/.nuphos-runtime/auth-key): <password> — enter it in Nuphos when connecting this runtime. …
-```
+From then on the same page is the runtime's console. Sign in with the password to:
 
-You paste it into Nuphos when you connect the runtime. Read it back from the
-container's logs (`docker logs nuphos-runtime`, or the service's logs on Zeabur),
-or from the file itself:
+- connect the runtime to a Nuphos team (see [Connecting it to Nuphos](#connecting-it-to-nuphos));
+- see every connected team, who connected it, when it was connected and last
+  used, and revoke any of them;
+- sign the agent's provider account in;
+- see which command-line tools are built in, installed, or install on first use;
+- change the console password. This signs other browsers out and does not affect
+  connected teams.
 
-```sh
-docker exec nuphos-runtime cat /home/node/.nuphos-runtime/auth-key
-```
+The console keeps its state in `/home/node/.nuphos-runtime`: `console.json` holds
+the password hash and when the runtime was set up, `bindings.json` holds a SHA-256
+digest of each team's keys (never the keys), and `instance-id` identifies the
+runtime. **`/home/node` must be persistent**, so mount a volume there as above.
 
-Later boots reuse the stored password and never print it again.
-**`/home/node` must be persistent** — mount a volume there, as above. Without
-one the file is lost with the container, and every restart generates a new
-password that each Nuphos workspace connected to the runtime has to be given
-again. If the file goes missing from a home that has run a runtime before, the
-log says so with a `WARNING`. `OPENAB_ACP_AUTH_KEY_FILE` moves the file.
+#### Forgotten console password
 
-To choose the password yourself, set `OPENAB_ACP_AUTH_KEY`; it always wins over
-the stored one, and nothing is generated or written. It must be at least 32
-characters, using only letters, digits and ``! # $ % & ' * + - . ^ _ ` | ~`` — it
-travels in a WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot.
-`openssl rand -hex 32` always qualifies. A password under 32 characters, from
-either source, stops the container at startup with an error.
+Stop the container, delete `.nuphos-runtime/console.json` (and
+`.nuphos-runtime/auth-key`, if it exists) from the `/home/node` volume, then start
+it again. Setup reopens for 30 minutes. Connected teams keep working; delete
+`bindings.json` as well to disconnect all of them.
+
+#### A password in the environment
+
+Setting `OPENAB_ACP_AUTH_KEY` still works. The runtime starts already set up, `/acp`
+accepts that value as a deployment key (the console lists it but cannot revoke
+it; remove the variable to do that), and it is the console password until you change
+it in the console. It must be at least 32 characters, using only letters, digits
+and ``! # $ % & ' * + - . ^ _ ` | ~``. It travels in a WebSocket header, so spaces,
+quotes, `/`, `=` and `:` cannot be used. `openssl rand -hex 32` always qualifies. A
+shorter one stops the container at startup with an error.
+
+#### Without the console
+
+`OPENAB_RUNTIME_CONSOLE=false` restores the behaviour of 0.0.x. On first boot the
+runtime generates a password, stores it in `/home/node/.nuphos-runtime/auth-key`
+(mode `0600`) and prints it once. Every Nuphos team connects with that one password.
+`OPENAB_ACP_AUTH_KEY_FILE` moves the file. With the console on,
+`NUPHOS_RUNTIME_AUTOGEN_PASSWORD=true` still generates that file on first boot (the
+local compose stack uses it), and the console takes it as its password and as a
+connection.
 
 The volume also keeps the account the runtime signs in with
 (`/home/node/.claude` for Claude Code, `/home/node/.codex` for Codex) and the
@@ -182,19 +204,14 @@ ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
 nothing more than using the address they hand you; on a bare VPS, a reverse
 proxy such as Caddy does it in one line.
 
-Before pasting the address into Nuphos, open the base URL (`http://<host>:8080/`
-or its `https://` equivalent once TLS is in front) in a browser — openab serves
-an unauthenticated status page there confirming the runtime is up, its provider,
-and its version. It never shows the password, the derived key, or anything else
-secret.
+The page at the base URL answers in every state and always shows the runtime's
+provider and version, never a password or key, so it doubles as a status page.
 
-The password is the only thing standing in front of an agent that holds your
-workspace's cloud credentials, so openab will not serve `/acp` on a routable
-address without it, and refuses any upgrade that does not present it (`401`).
-Everything else ACP needs is already set in the image. The operator credential
-openab uses for runtime-wide status and sign-in is derived from the same
-password, by the runtime and by Nuphos alike, so there is no second secret to
-set or paste. To turn ACP off entirely, set `OPENAB_ACP_ENABLED=false`.
+A team's key is the only thing standing in front of an agent that holds your
+workspace's cloud credentials, so `/acp` refuses any upgrade that does not present
+a connected team's key or the deployment key (`401`). Before the runtime is set up,
+it refuses every upgrade. Everything else ACP needs is already set in the image. To
+turn ACP off entirely, set `OPENAB_ACP_ENABLED=false`.
 
 The image ships a default `/etc/openab/config.toml`, so nothing has to be
 mounted for the container to start. openab reads that one path and merges
@@ -237,10 +254,30 @@ the app and does not report a sign-in state.
 
 ### Connecting it to Nuphos
 
-A workspace administrator opens **Settings → Agent → Connect your own** and pastes
-two things: the runtime's `wss://` address and the password it was started with.
-That is the whole binding. Plain `ws://` is accepted only for an in-cluster `*.svc`
-host; anything reached over the internet has to be `wss://`.
+In the console, press **Connect to Nuphos**. Nuphos Desktop opens, shows the
+runtime's address and asks which team to connect it to. Only teams you administer
+can be picked. Confirm, and that team gets its own key for this runtime. To add the
+runtime to another team, press **Connect to Nuphos** again.
+
+If Nuphos Desktop does not open, go to **Settings → Agent → Connect your own**,
+choose the pairing code option, and enter the agent URL and pairing code the console
+shows. A code works once and expires after 10 minutes. Plain `ws://` is accepted only
+for an in-cluster `*.svc` host; anything reached over the internet has to be
+`wss://`.
+
+The URL Nuphos connects to is taken from the address you opened the console at. If
+Nuphos reaches the runtime at a different address, set it under **Agent URL Nuphos
+connects to** in the console, or with `OPENAB_RUNTIME_PUBLIC_URL`. The local compose
+stack is one example: your browser uses `127.0.0.1`, but the backend uses
+`ws://runtime:8080/acp`.
+
+A team's connection shows as waiting until Nuphos first uses it. Revoking it in the
+console closes its sessions at once, and Nuphos then reports the connection as
+revoked until someone connects the runtime again. Removing the runtime from a team in
+Nuphos revokes that team's key on the runtime as well.
+
+All connected teams share this one runtime: its files, its sessions and its provider
+account. Connect it only to teams that may share them.
 
 Everything else a Nuphos-provisioned pod has always had is already in the image,
 so the agent reaches Nuphos' own tools as soon as it is connected — the container
@@ -254,8 +291,9 @@ switch. If you also enable Discord, Slack or LINE on the same container, **add**
 their sender ids to it rather than replacing the baked value, or those platforms
 are denied instead.
 
-To rotate the password, change `OPENAB_ACP_AUTH_KEY` (or replace the stored file
-and restart) and then update it in the runtime's settings. Removing a runtime from Nuphos does not revoke its password.
+To rotate a team's key, revoke it in the console and connect again. A runtime
+without the console rotates its password by changing `OPENAB_ACP_AUTH_KEY` (or
+replacing the stored file and restarting) and then updating it in Nuphos.
 
 #### Separate operator key
 
@@ -264,6 +302,18 @@ The operator credential is derived from the password unless you set
 Nuphos-provisioned pod needs that: the provisioner issues both keys from its own
 Secret. A self-hosted runtime gains nothing from a second value — anyone holding
 the password can already run code in the container through the agent.
+
+#### Upgrading from 0.0.x to 0.1.0
+
+0.1.0 turns the console on. A volume that already has
+`/home/node/.nuphos-runtime/auth-key` needs no setup: that password becomes the
+console password, and every team already connected with it keeps working. The
+console lists them together as "Connected with the runtime password". To give each
+team its own key, press **Connect to Nuphos**, choose to update the existing
+connection in Nuphos, then revoke the password connection in the console. The
+`auth-key` file is left in place and never rewritten. One-click connect needs a
+Nuphos release that supports pairing codes; the password keeps working with earlier
+ones.
 
 #### Upgrading from 0.0.6 or earlier
 
@@ -283,8 +333,10 @@ above, or its sessions will fail with "sign in required".
 
 ### Signing in from the app
 
-Once a runtime is connected, press **Sign in** on its card. The app runs the
-provider's own sign-in inside the container, so you don't need a shell on the host:
+Once a runtime is connected, press **Sign in** on its card, or use **Agent sign-in**
+in the runtime's console. Either way the provider's own sign-in runs inside the
+container, so you don't need a shell on the host. Only one sign-in runs at a time,
+so one started in the console and one started from Nuphos exclude each other.
 
 - **Codex:** the app shows a device code to enter on the ChatGPT page.
 - **Claude Code:** the app opens Claude's sign-in page. After you approve, that page
@@ -374,6 +426,22 @@ CI runs all of them on every pull request, builds both runtime images on a
 published gateway base, and smoke-tests them, including a first-use install of
 an archive tool, a Debian-package tool and the C toolchain. The gateway base is
 a Rust build, so it is built only when an image is published.
+
+The console needs a gateway built from the pinned submodule, so its smoke test
+runs against a local build rather than in PR CI. Build the base and the image, start
+the image on a free port, and drive it from the host:
+
+```sh
+docker build -f third_party/openab/Dockerfile.unified --target agentcore \
+  -t nuphos-openab-base:local third_party/openab
+docker build image --build-arg BASE_IMAGE=nuphos-openab-base:local \
+  --build-arg RUNTIME_PROVIDER=claude-code -t nuphos-runtime:local
+docker run -d --rm --name nuphos-console-smoke -p 127.0.0.1:48080:8080 nuphos-runtime:local
+node test/console-smoke.mjs http://127.0.0.1:48080
+```
+
+To check an upgrade instead, start the image on a volume whose
+`.nuphos-runtime/auth-key` holds a password and pass `--legacy <password>`.
 
 ## Licence
 

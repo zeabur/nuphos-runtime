@@ -37,7 +37,7 @@ test('the image bakes the ACP environment a provisioned pod has always had', () 
   assert.match(dockerfile, /^ENV OPENAB_ACP_ENABLED=true \\$/mu)
   assert.match(dockerfile, /^ {4}OPENAB_ACP_MCP_SERVERS=true \\$/mu)
   assert.match(dockerfile, /^ {4}OPENAB_ACP_STREAMING=true \\$/mu)
-  assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client$/mu)
+  assert.match(dockerfile, /^ {4}GATEWAY_ALLOWED_USERS=acp_client( \\)?$/mu)
 })
 
 test('both agents run in the workspace the image creates, never one without the other', () => {

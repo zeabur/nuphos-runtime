@@ -18,3 +18,12 @@ test('the published Codex and Claude Code images each pass their own label plus 
   assert.ok(build.includes('RUNTIME_LABEL=${{ steps.tags.outputs.label }}'))
   assert.ok(build.includes('RUNTIME_VERSION=${{ needs.plan.outputs.version }}'))
 })
+
+test('the image turns on the runtime console with its state on the home volume', () => {
+  assert.match(dockerfile, /^ {4}OPENAB_RUNTIME_CONSOLE=true \\$/mu)
+  assert.match(dockerfile, /^ {4}OPENAB_RUNTIME_STATE_DIR=\/home\/node\/\.nuphos-runtime \\$/mu)
+  assert.match(
+    dockerfile,
+    /^ {4}OPENAB_RUNTIME_CONNECT_URL_TEMPLATE="nuphos:\/\/connect-runtime\?url=\{url\}&code=\{code\}&exp=\{exp\}"$/mu,
+  )
+})
