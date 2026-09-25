@@ -111,19 +111,21 @@ export async function nuphosApplyRuntimeDefaults(agent, params, response) {
 
 export function patchRuntimeDefaults(source) {
   const anchor = 'async newSession(params) {'
-  if (source.split(anchor).length !== 2)
-    throw new Error('Expected exactly one native ACP session/new handler.')
+  // Skills live in the container, so a session reopened after a restart needs them again.
+  const reopenAnchors = ['async loadSession(params) {', 'async resumeSession(params) {']
+  for (const handler of [anchor, ...reopenAnchors])
+    if (source.split(handler).length !== 2)
+      throw new Error(`Expected exactly one native ACP \`${handler}\` handler.`)
   const shebang = source.match(/^#![^\n]*\n/)?.[0] ?? ''
-  // One patch against the single `newSession` anchor. A second, independent patch would
-  // break the "exactly one handler" assertion above, so the skills sync rides this one.
-  return `${shebang}${nuphosSyncRuntimeSkills.toString()}\n${nuphosApplyRuntimeDefaults.toString()}\n${source
-    .slice(shebang.length)
-    .replace(
-      anchor,
-      `async newSession(params) {
+  let body = source.slice(shebang.length).replace(
+    anchor,
+    `async newSession(params) {
     await nuphosSyncRuntimeSkills(params);
     return nuphosApplyRuntimeDefaults(this, params, await this.nuphosNewSession(params));
   }
   async nuphosNewSession(params) {`,
-    )}`
+  )
+  for (const handler of reopenAnchors)
+    body = body.replace(handler, `${handler}\n        await nuphosSyncRuntimeSkills(params);`)
+  return `${shebang}${nuphosSyncRuntimeSkills.toString()}\n${nuphosApplyRuntimeDefaults.toString()}\n${body}`
 }
