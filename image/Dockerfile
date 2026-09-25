@@ -76,8 +76,8 @@ ENV PATH="/opt/nuphos-codex-acp/node_modules/.bin:/opt/nuphos-claude-agent-acp/n
 # An operator who also enables Discord, Slack or LINE must ADD their sender ids here
 # rather than drop the line, or those platforms are denied instead.
 #
-# openab will not mount /acp on a routable address without OPENAB_ACP_AUTH_KEY, so
-# enabling it here exposes nothing until the password is set. Override with =false.
+# openab will not mount /acp on a routable address without OPENAB_ACP_AUTH_KEY; the
+# entrypoint supplies one from the home volume when none is set. Override with =false.
 ENV OPENAB_ACP_ENABLED=true \
     OPENAB_ACP_MCP_SERVERS=true \
     OPENAB_ACP_STREAMING=true \

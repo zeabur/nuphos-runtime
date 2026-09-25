@@ -37,7 +37,7 @@ until someone re-reviews the patch.
 | --- | --- |
 | `/opt/nuphos-claude-agent-acp` | Claude adapter (0.74.0, Agent SDK 0.3.261), patched to publish session state and to bridge HTTP MCP servers |
 | `/opt/nuphos-codex-acp` | Codex adapter (1.1.4, Codex CLI 0.153.4), patched for per-session instructions and environment, MCP bridging, and steering an active turn |
-| `/usr/local/bin/nuphos-runtime-start` | The entrypoint: derives the operator key from the password when none is set, lays out `/workspace` the way a provisioned pod does, then becomes openab |
+| `/usr/local/bin/nuphos-runtime-start` | The entrypoint: resolves the password (environment, else the stored one, else a new one), derives the operator key from it when none is set, lays out `/workspace` the way a provisioned pod does, then becomes openab |
 | `/etc/openab/config.toml` | The gateway config openab reads, so the container starts with nothing mounted; a mount at this path replaces it |
 | `/opt/runtime-defaults.mjs` | Applies a model, reasoning effort and fast-mode default to a new session |
 | `/opt/nuphos-runtime/mcp-http-bridge.mjs` | Relays a stdio MCP server to a bearer-authenticated HTTP endpoint, re-reading the token per request |
@@ -93,23 +93,47 @@ only reaches users through a rebuild of both.
 
 ## Running one
 
-A runtime takes one variable: an admin password. Nothing else has to be set.
+A runtime needs nothing set. Give it a persistent home and start it:
 
 ```sh
 docker run -d --name nuphos-runtime -p 8080:8080 \
-  -e OPENAB_ACP_AUTH_KEY="$(openssl rand -hex 32)" \
   -v nuphos-runtime-home:/home/node \
-  ghcr.io/zeabur/nuphos-runtime:0.0.7-codex
+  ghcr.io/zeabur/nuphos-runtime:0.0.12-codex
 ```
 
-Use `0.0.7-claude-code` for a Claude Code runtime. Keep the password: you paste it
-into Nuphos when you connect the runtime. It must be at least 32 characters, using
-only letters, digits and ``! # $ % & ' * + - . ^ _ ` | ~`` — it travels in a
-WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot. `openssl rand -hex 32`
-always qualifies.
+Use `0.0.12-claude-code` for a Claude Code runtime.
 
-The volume is optional but recommended. It keeps whatever the runtime holds
-across container replacement — for Codex, the account it signs in with.
+On first boot the runtime generates its admin password, stores it in
+`/home/node/.nuphos-runtime/auth-key` (mode `0600`), and prints it once:
+
+```text
+Generated runtime password (stored in /home/node/.nuphos-runtime/auth-key): <password> — enter it in Nuphos when connecting this runtime. …
+```
+
+You paste it into Nuphos when you connect the runtime. Read it back from the
+container's logs (`docker logs nuphos-runtime`, or the service's logs on Zeabur),
+or from the file itself:
+
+```sh
+docker exec nuphos-runtime cat /home/node/.nuphos-runtime/auth-key
+```
+
+Later boots reuse the stored password and never print it again.
+**`/home/node` must be persistent** — mount a volume there, as above. Without
+one the file is lost with the container, and every restart generates a new
+password that each Nuphos workspace connected to the runtime has to be given
+again. If the file goes missing from a home that has run a runtime before, the
+log says so with a `WARNING`. `OPENAB_ACP_AUTH_KEY_FILE` moves the file.
+
+To choose the password yourself, set `OPENAB_ACP_AUTH_KEY`; it always wins over
+the stored one, and nothing is generated or written. It must be at least 32
+characters, using only letters, digits and ``! # $ % & ' * + - . ^ _ ` | ~`` — it
+travels in a WebSocket header, so spaces, quotes, `/`, `=` and `:` cannot.
+`openssl rand -hex 32` always qualifies. A password under 32 characters, from
+either source, stops the container at startup with an error.
+
+The volume also keeps whatever else the runtime holds across container
+replacement — for Codex, the account it signs in with.
 
 ACP is then served at `ws://<host>:8080/acp`, and Nuphos connects to it over
 **`wss://`** — put TLS in front of the port. Most hosts terminate TLS for you
@@ -181,8 +205,8 @@ switch. If you also enable Discord, Slack or LINE on the same container, **add**
 their sender ids to it rather than replacing the baked value, or those platforms
 are denied instead.
 
-To rotate the password, change it on the container and then in the runtime's
-settings. Removing a runtime from Nuphos does not revoke its password.
+To rotate the password, change `OPENAB_ACP_AUTH_KEY` (or replace the stored file
+and restart) and then update it in the runtime's settings. Removing a runtime from Nuphos does not revoke its password.
 
 #### Separate operator key
 

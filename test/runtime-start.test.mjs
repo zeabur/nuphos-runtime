@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readlinkSync, readFileSync } from 'node:fs'
+import { createHmac } from 'node:crypto'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -23,20 +34,34 @@ const VECTORS = [
 ]
 
 /** Run the start script with a probe in place of openab and report what it saw. */
-function start(env) {
+function run(env, home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))) {
   const workspace = mkdtempSync(join(tmpdir(), 'nuphos-start-'))
+  const keyFile = join(home, '.nuphos-runtime/auth-key')
   const result = spawnSync(
     'sh',
-    [startScript, 'node', '-e', 'process.stdout.write(JSON.stringify(process.env))'],
+    [startScript, 'node', '-e', 'require("node:fs").writeSync(3, JSON.stringify(process.env))'],
     {
-      env: { PATH: process.env.PATH, NUPHOS_RUNTIME_WORKSPACE: workspace, ...env },
+      env: {
+        PATH: process.env.PATH,
+        NUPHOS_RUNTIME_WORKSPACE: workspace,
+        OPENAB_ACP_ENABLED: 'true',
+        OPENAB_ACP_AUTH_KEY_FILE: keyFile,
+        ...env,
+      },
       encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     },
   )
 
+  return { result, workspace, home, keyFile }
+}
+
+function start(env, home) {
+  const { result, ...rest } = run(env, home)
+
   assert.equal(result.status, 0, result.stderr)
 
-  return { env: JSON.parse(result.stdout), workspace, stderr: result.stderr }
+  return { env: JSON.parse(result.output[3]), stdout: result.stdout, stderr: result.stderr, ...rest }
 }
 
 test('the operator key is derived from the password alone', () => {
@@ -71,17 +96,123 @@ test('the same password pasted into both variables still yields a working operat
   assert.equal(env.OPENAB_ACP_CONTROL_KEY, expected)
 })
 
-test('without a password there is nothing to derive, and nothing is invented', () => {
+test('a password in the environment wins over the stored one', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  const first = start({}, home)
+  const [password, expected] = VECTORS[0]
+  const { env, stdout } = start({ OPENAB_ACP_AUTH_KEY: password }, home)
+
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, password)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, expected)
+  assert.equal(stdout, '')
+  assert.equal(readFileSync(first.keyFile, 'utf8').trim(), first.env.OPENAB_ACP_AUTH_KEY)
+})
+
+test('without a password one is generated once, stored privately, and announced once', () => {
+  const { env, stdout, keyFile, home } = start({})
+  const password = env.OPENAB_ACP_AUTH_KEY
+
+  assert.match(password, /^[0-9a-f]{64}$/u)
+  assert.equal(readFileSync(keyFile, 'utf8').trim(), password)
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+  assert.equal(statSync(join(home, '.nuphos-runtime')).mode & 0o777, 0o700)
+  assert.deepEqual(readdirSync(join(home, '.nuphos-runtime')), ['auth-key'])
+  assert.equal(stdout.split(password).length, 2)
+  assert.match(stdout, /^Generated runtime password \(stored in [^)]+\): [0-9a-f]{64} — /u)
+  assert.match(stdout, /persistent volume/u)
+  assert.doesNotMatch(stdout, /WARNING/u)
+
+  const again = start({}, home)
+
+  assert.equal(again.env.OPENAB_ACP_AUTH_KEY, password)
+  assert.equal(again.stdout.includes(password), false)
+  assert.equal(again.stdout, `Using the runtime password from ${keyFile}.\n`)
+})
+
+test('the operator key is derived from the stored password', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  const [password, expected] = VECTORS[1]
+  mkdirSync(join(home, '.nuphos-runtime'), { mode: 0o700 })
+  writeFileSync(join(home, '.nuphos-runtime/auth-key'), `${password}\n`, { mode: 0o600 })
+
+  const { env } = start({}, home)
+
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, password)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, expected)
+})
+
+test('the operator key is derived from a generated password', () => {
   const { env } = start({})
 
-  assert.equal(env.OPENAB_ACP_CONTROL_KEY, undefined)
+  assert.equal(
+    env.OPENAB_ACP_CONTROL_KEY,
+    createHmac('sha256', env.OPENAB_ACP_AUTH_KEY).update('nuphos-runtime-control-v1').digest('hex'),
+  )
+})
+
+test('a home that has run before warns that the new password must be re-entered', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  const authFile = join(home, 'codex-auth.json')
+  writeFileSync(authFile, '{}')
+
+  const { stdout } = start({ OPENAB_RUNTIME_AUTH_FILE: authFile }, home)
+
+  assert.match(stdout, /^WARNING: .*update it in every Nuphos workspace/u)
+})
+
+test('a custom key file in a directory it does not own leaves that directory alone', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  chmodSync(home, 0o755)
+  const keyFile = join(home, 'runtime-password')
+
+  const { env, stdout } = start({ OPENAB_ACP_AUTH_KEY_FILE: keyFile }, home)
+
+  assert.equal(statSync(home).mode & 0o777, 0o755)
+  assert.equal(statSync(keyFile).mode & 0o777, 0o600)
+  assert.equal(readFileSync(keyFile, 'utf8').trim(), env.OPENAB_ACP_AUTH_KEY)
+  assert.doesNotMatch(stdout, /WARNING/u)
+})
+
+test('a password that is too short fails the start, wherever it came from', () => {
+  const fromEnv = run({ OPENAB_ACP_AUTH_KEY: 'too-short' })
+
+  assert.notEqual(fromEnv.result.status, 0)
+  assert.match(fromEnv.result.stderr, /at least 32/u)
+  assert.equal(fromEnv.result.stderr.includes('too-short'), false)
+
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  mkdirSync(join(home, '.nuphos-runtime'))
+  writeFileSync(join(home, '.nuphos-runtime/auth-key'), 'short\n')
+  const fromFile = run({}, home)
+
+  assert.notEqual(fromFile.result.status, 0)
+  assert.match(fromFile.result.stderr, /auth-key is 5 characters; it must be at least 32/u)
+})
+
+test('a home it cannot write fails the start instead of running without a password', () => {
+  const home = mkdtempSync(join(tmpdir(), 'nuphos-home-'))
+  chmodSync(home, 0o500)
+  const { result } = run({}, home)
+  chmodSync(home, 0o700)
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /set OPENAB_ACP_AUTH_KEY/u)
+})
+
+test('with ACP off no password is needed, and none is invented', () => {
+  const { env, stdout, keyFile } = start({ OPENAB_ACP_ENABLED: 'false' })
+
   assert.equal(env.OPENAB_ACP_AUTH_KEY, undefined)
+  assert.equal(env.OPENAB_ACP_CONTROL_KEY, undefined)
+  assert.equal(existsSync(keyFile), false)
+  assert.equal(stdout, '')
 })
 
 test('the password never reaches argv or the output', () => {
   const [password] = VECTORS[0]
-  const { stderr } = start({ OPENAB_ACP_AUTH_KEY: password })
+  const { stdout, stderr } = start({ OPENAB_ACP_AUTH_KEY: password })
 
+  assert.equal(stdout.includes(password), false)
   assert.equal(stderr.includes(password), false)
   // node is handed the password through its environment; the script text passes no
   // variable on the command line.

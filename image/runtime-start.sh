@@ -3,6 +3,63 @@
 # provisioner, then becomes the command it was given — openab, by default.
 set -eu
 
+min_password_length=32
+
+fail() {
+  printf 'nuphos-runtime-start: %s\n' "$1" >&2
+  exit 1
+}
+
+check_password() {
+  [ "${#OPENAB_ACP_AUTH_KEY}" -ge "$min_password_length" ] \
+    || fail "the runtime password from $1 is ${#OPENAB_ACP_AUTH_KEY} characters; it must be at least $min_password_length. \`openssl rand -hex 32\` makes one that fits."
+}
+
+generate_password() {
+  key_dir=$(dirname "$key_file")
+  # Besides the password itself, the traces an earlier boot leaves on this home. A
+  # custom key file may sit in a directory the runtime does not own.
+  had_identity=
+  if { [ "$key_file" = "$default_key_file" ] && [ -d "$key_dir" ]; } \
+    || { [ -n "${OPENAB_RUNTIME_AUTH_FILE:-}" ] && [ -e "$OPENAB_RUNTIME_AUTH_FILE" ]; }; then
+    had_identity=1
+  fi
+
+  if [ ! -d "$key_dir" ]; then
+    (umask 077 && mkdir -p "$key_dir") \
+      || fail "cannot create $key_dir to store the runtime password; set OPENAB_ACP_AUTH_KEY or make it writable."
+  fi
+  OPENAB_ACP_AUTH_KEY=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
+  tmp=$(umask 077 && mktemp "$key_dir/.auth-key.XXXXXX") \
+    || fail "cannot write the runtime password to $key_dir."
+  { printf '%s\n' "$OPENAB_ACP_AUTH_KEY" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$key_file"; } \
+    || { rm -f "$tmp"; fail "cannot write the runtime password to $key_file."; }
+
+  if [ -n "$had_identity" ]; then
+    printf 'WARNING: no runtime password was found at %s, but this home has run a runtime before. A new password was generated: update it in every Nuphos workspace this runtime is connected to.\n' "$key_file"
+  fi
+  printf 'Generated runtime password (stored in %s): %s — enter it in Nuphos when connecting this runtime. Unless %s is on a persistent volume, the password changes on every restart.\n' \
+    "$key_file" "$OPENAB_ACP_AUTH_KEY" "$key_file"
+}
+
+# One set in the environment wins; otherwise the runtime keeps its own on the home
+# volume, generated on first boot.
+if [ "${OPENAB_ACP_ENABLED:-}" = true ] || [ "${OPENAB_ACP_ENABLED:-}" = 1 ]; then
+  default_key_file=/home/node/.nuphos-runtime/auth-key
+  key_file=${OPENAB_ACP_AUTH_KEY_FILE:-$default_key_file}
+  if [ -n "${OPENAB_ACP_AUTH_KEY:-}" ]; then
+    check_password OPENAB_ACP_AUTH_KEY
+  elif [ -e "$key_file" ]; then
+    OPENAB_ACP_AUTH_KEY=$(tr -d '\r\n' < "$key_file") \
+      || fail "cannot read the runtime password from $key_file."
+    check_password "$key_file"
+    printf 'Using the runtime password from %s.\n' "$key_file"
+  else
+    generate_password
+  fi
+  export OPENAB_ACP_AUTH_KEY
+fi
+
 # Derive the operator key from the password unless one was set. Must match
 # `deriveRuntimeControlKey` in the Nuphos backend. A value equal to the password is
 # replaced too, because openab discards an operator key equal to the transport key.
