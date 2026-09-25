@@ -134,6 +134,9 @@ ENV OPENAB_RUNTIME_LOGIN_COMMAND="${RUNTIME_LOGIN_COMMAND}" \
 ENV OPENAB_RUNTIME_JOBS="panel=node --max-old-space-size=512 /opt/nuphos-runtime/panel-job.mjs;tools=node /opt/nuphos-runtime/tools/nuphos-tools.mjs list --json" \
     OPENAB_RUNTIME_JOB_MAX_TIMEOUT_MS=300000
 
+# The volumes whose usage `_openab/runtime/state` reports to the operator.
+ENV OPENAB_RUNTIME_DISK_PATHS=/home/node,/workspace
+
 # Read by openab's `GET /` status page (see zeabur/openab#40): a human-readable
 # runtime label and the image's own release version, so a self-hosted operator
 # can sanity-check a fresh deploy in a browser with zero auth. The caller
