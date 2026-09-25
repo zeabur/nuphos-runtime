@@ -364,8 +364,10 @@ function main(argv) {
   const pick = (names) => {
     const all = Object.keys(manifest).filter((name) => !manifest[name].baked)
     const wanted = names.includes('--all') ? all : names
-    for (const name of wanted)
+    for (const name of wanted) {
+      if (manifest[name]?.baked) throw new Error(`${name} is built into the image`)
       if (!all.includes(name)) throw new Error(`unknown tool ${name}; see nuphos-tools list`)
+    }
     return wanted
   }
 
