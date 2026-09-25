@@ -201,3 +201,36 @@ test('the image carries one agent CLI and reports the adapter it actually runs',
   for (const install of dockerfile.matchAll(/npm ci [^\n]*/gu))
     assert.match(install[0], /--cache \/tmp\/npm-cache/u, 'npm must not leave its cache in /home/node')
 })
+
+test('list --json reports every tool with its state for the runtime console', () => {
+  const root = scratch()
+  const lazy = Object.entries(manifest).find(([, tool]) => !tool.baked)
+  mkdirSync(join(root, lazy[0], lazy[1].version, '.bin'), { recursive: true })
+  const cli = new URL('../image/tools/nuphos-tools.mjs', import.meta.url).pathname
+  const out = execFileSync(process.execPath, [cli, 'list', '--json'], {
+    env: { NUPHOS_TOOLS_DIR: root, PATH: '/usr/bin:/bin' },
+  }).toString()
+  const { tools } = JSON.parse(out)
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    Object.keys(manifest),
+  )
+  for (const tool of tools) {
+    const expected = manifest[tool.name].baked
+      ? 'built-in'
+      : tool.name === lazy[0]
+        ? 'installed'
+        : 'on-first-use'
+    assert.equal(tool.state, expected, tool.name)
+    assert.equal(tool.installed, expected !== 'on-first-use', tool.name)
+    assert.equal(tool.version, manifest[tool.name].version)
+    assert.deepEqual(tool.commands, Object.keys(manifest[tool.name].commands))
+  }
+})
+
+test('the image allowlists the tools job the console reads', () => {
+  assert.match(
+    dockerfile,
+    /^ENV OPENAB_RUNTIME_JOBS="[^"\n]*;tools=node \/opt\/nuphos-runtime\/tools\/nuphos-tools\.mjs list --json"/mu,
+  )
+})
