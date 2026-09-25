@@ -62,7 +62,8 @@ FROM common AS claude-code
 # The committed lockfile is the integrity boundary for this build step.
 ARG CLAUDE_AGENT_SDK_VERSION=0.3.261
 COPY claude-agent-acp/package.json claude-agent-acp/package-lock.json \
-     claude-agent-acp/patch-adapter.mjs claude-agent-acp/turn-completion.mjs \
+     claude-agent-acp/patch-adapter.mjs claude-agent-acp/session-state.mjs \
+     claude-agent-acp/turn-completion.mjs \
      /opt/nuphos-claude-agent-acp/
 # The lockfile carries no libc field, so npm installs the musl build of the
 # SDK's native CLI beside the glibc one this Debian image runs.
