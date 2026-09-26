@@ -276,8 +276,15 @@ console closes its sessions at once, and Nuphos then reports the connection as
 revoked until someone connects the runtime again. Removing the runtime from a team in
 Nuphos revokes that team's key on the runtime as well.
 
-All connected teams share this one runtime: its files, its sessions and its provider
-account. Connect it only to teams that may share them.
+Each team only sees its own conversations on the runtime: its session list, stop,
+steering and approvals cover the sessions it started, and it cannot resume another
+team's. A connection made with the runtime password from 0.0.x, or with
+`OPENAB_ACP_AUTH_KEY`, still sees every session.
+
+That is not isolation. All connected teams still share this one runtime: one
+filesystem (an agent working for one team can read and change files another team's
+agent wrote), one provider sign-in and account, and the same installed tools. Connect
+it only to teams that may share them.
 
 Everything else a Nuphos-provisioned pod has always had is already in the image,
 so the agent reaches Nuphos' own tools as soon as it is connected — the container
