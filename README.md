@@ -342,8 +342,8 @@ above, or its sessions will fail with "sign in required".
 
 Once a runtime is connected, press **Sign in** on its card, or use **Agent sign-in**
 in the runtime's console. Either way the provider's own sign-in runs inside the
-container, so you don't need a shell on the host. Only one sign-in runs at a time,
-so one started in the console and one started from Nuphos exclude each other.
+container, so you don't need a shell on the host. Only one sign-in runs at a time:
+starting one, in the console or from Nuphos, stops any sign-in already running.
 
 - **Codex:** the app shows a device code to enter on the ChatGPT page.
 - **Claude Code:** the app opens Claude's sign-in page. After you approve, that page
