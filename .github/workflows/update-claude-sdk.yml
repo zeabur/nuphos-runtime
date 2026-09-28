@@ -94,7 +94,7 @@ jobs:
     if: needs.update.outputs.changed == 'true'
     uses: ./.github/workflows/build.yml
     permissions:
-      contents: read
+      contents: write
       packages: write
     with:
       release_tag: ${{ needs.update.outputs.tag }}

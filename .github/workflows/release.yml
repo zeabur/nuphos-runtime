@@ -82,7 +82,7 @@ jobs:
     needs: tag
     uses: ./.github/workflows/build.yml
     permissions:
-      contents: read
+      contents: write
       packages: write
     with:
       release_tag: v${{ needs.tag.outputs.version }}

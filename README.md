@@ -476,3 +476,12 @@ after tagging, rerun the failed jobs, or run **Build runtime image** with that t
 do not create another version merely to retry. Review failed scheduled runs in
 GitHub Actions. Publishing does not update Nuphos's configured runtime version or
 the Desktop's pinned runtime commit; those remain separate deployment steps.
+
+### Release changelogs
+
+[GitHub Releases](https://github.com/zeabur/nuphos-runtime/releases) is the runtime
+changelog. Tagged builds publish a release only after all requested provider images
+succeed. Notes include commits since the previous tag (including automated SDK
+updates), bundled SDK/CLI and adapter versions, image tags and a full comparison
+link. Untagged builds do not create releases. Reruns preserve existing notes and
+human edits. Both manual releases and automatic SDK releases use this same path.
