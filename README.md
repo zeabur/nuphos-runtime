@@ -485,3 +485,17 @@ succeed. Notes include commits since the previous tag (including automated SDK
 updates), bundled SDK/CLI and adapter versions, image tags and a full comparison
 link. Untagged builds do not create releases. Reruns preserve existing notes and
 human edits. Both manual releases and automatic SDK releases use this same path.
+
+### Automatic Codex CLI updates
+
+`Update Codex CLI and release` checks npm's stable `latest` daily at 07:23 UTC
+and supports manual dispatch. It updates the pinned CLI and lockfile, runs the
+Codex adapter, active-turn steering and real CLI environment-isolation regressions,
+then builds and smoke-tests a candidate image including prompt-free model discovery.
+Only passing updates commit a runtime patch and publish both images and a GitHub
+Release. No change skips publication; major CLI changes require manual review.
+It shares the release lock with Claude SDK and manual releases.
+
+Both ACP adapters remain pinned: Nuphos patches their bundles, so adapter upgrades
+require a reviewed patch port and compatibility tests. CLI/SDK updates are automatic;
+ACP adapter updates are not. Deployment to existing runtimes remains separate.
