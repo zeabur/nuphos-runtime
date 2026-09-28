@@ -7,7 +7,8 @@
 import { spawn } from 'node:child_process'
 
 const provider = process.argv[2]
-const requestedModel = process.argv[3]
+const allowUnauthenticated = process.argv.includes('--allow-unauthenticated')
+const requestedModel = process.argv.slice(3).find((arg) => arg !== '--allow-unauthenticated')
 const cwd = process.env.ACP_DISCOVERY_CWD ?? '/workspace'
 
 if (!['codex', 'claude-code'].includes(provider)) {
@@ -100,6 +101,11 @@ child.stdout.on('data', (chunk) => {
           error: { code: -32601, message: 'Unavailable during model discovery' },
         })}\n`,
       )
+      continue
+    }
+    if (allowUnauthenticated && provider === 'codex' && frame.id === 2 &&
+        frame.error?.code === -32000 && frame.error?.message === 'Authentication required') {
+      finish({ models: [], authenticationRequired: true })
       continue
     }
     if (frame.error) fail(`request ${frame.id} failed: ${JSON.stringify(frame.error)}`)

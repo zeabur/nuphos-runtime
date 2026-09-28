@@ -63,8 +63,8 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         run: |
           docker run --rm -v "$PWD/test:/smoke:ro" --entrypoint bash nuphos-runtime:sdk-candidate /smoke/image-smoke.sh
-          docker run --rm -v "$PWD/test:/smoke:ro" --entrypoint node nuphos-runtime:sdk-candidate /smoke/model-discovery.mjs codex > /tmp/models.json
-          jq -e '.models | length > 0' /tmp/models.json
+          docker run --rm -v "$PWD/test:/smoke:ro" --entrypoint node nuphos-runtime:sdk-candidate /smoke/model-discovery.mjs codex --allow-unauthenticated > /tmp/models.json
+          jq -e '(.models | length > 0) or (.authenticationRequired == true)' /tmp/models.json
           cat /tmp/models.json >> "$GITHUB_STEP_SUMMARY"
       - name: Commit tested CLI and tag a runtime patch
         id: release

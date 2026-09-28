@@ -499,3 +499,8 @@ It shares the release lock with Claude SDK and manual releases.
 Both ACP adapters remain pinned: Nuphos patches their bundles, so adapter upgrades
 require a reviewed patch port and compatibility tests. CLI/SDK updates are automatic;
 ACP adapter updates are not. Deployment to existing runtimes remains separate.
+
+The Codex candidate-image probe runs without an account: an explicit native
+`Authentication required` response is expected and recorded as such. Other errors
+remain fatal. Model/session/config behavior is exercised separately against the
+App Server fixture; CI never supplies a customer's credential or sends a prompt.
