@@ -459,3 +459,20 @@ licences, including software that is not open source: `@anthropic-ai/claude-code
 and the Claude Agent SDK are distributed under Anthropic's commercial terms.
 [NOTICE](NOTICE) lists what is included and under what terms. Nuphos and Zeabur
 are not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI.
+
+### Automatic Claude SDK updates
+
+`Update Claude SDK and release` checks npm's stable `latest` daily at 06:23 UTC,
+with a manual **Run workflow** option. A newer SDK in the same major updates the
+SDK override, lockfile and Dockerfile assertion together. Helpers, patched Claude
+adapter regressions, an image build and native model discovery must pass before
+it commits a runtime patch and atomically pushes its tag. The existing build
+workflow publishes both providers so the shared runtime version stays usable.
+No change means no release; SDK major changes require manual review.
+
+The workflow uses the same `GITHUB_TOKEN` write permission as manual releases and
+respects branch protection. Failed checks stop publication. If publication fails
+after tagging, rerun the failed jobs, or run **Build runtime image** with that tag;
+do not create another version merely to retry. Review failed scheduled runs in
+GitHub Actions. Publishing does not update Nuphos's configured runtime version or
+the Desktop's pinned runtime commit; those remain separate deployment steps.
