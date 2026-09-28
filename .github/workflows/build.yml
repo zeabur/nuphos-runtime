@@ -267,3 +267,37 @@ jobs:
             echo ""
             echo "Assign the immutable reference above to the intended runtime(s) in Settings → Agent."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  release-notes:
+    name: Publish GitHub Release
+    needs: [plan, build]
+    if: inputs.release_tag != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      # Read the note generator from reviewed main, and version data from the
+      # vetted release tag. This also supports republishing older tags.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Publish changelog after every requested image succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          set -euo pipefail
+          # Preserve existing release notes, including human edits, on reruns.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; keeping its notes."
+            exit 0
+          fi
+          node scripts/runtime-release-notes.mjs "$RELEASE_TAG" "$PROVIDER" > /tmp/release-notes.md
+          gh release create "$RELEASE_TAG" --verify-tag --title "Runtime $RELEASE_TAG" --notes-file /tmp/release-notes.md

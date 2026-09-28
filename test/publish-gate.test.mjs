@@ -50,3 +50,14 @@ test('the release path tags main and publishes that tag', () => {
   assert.match(release, /release_tag: v\$\{\{ needs\.tag\.outputs\.version \}\}/)
   assert.doesNotMatch(release, /gh workflow run/)
 })
+
+test('GitHub release publication waits for all images and requires an existing tag', () => {
+  assert.match(build, /needs: \[plan, build\]/)
+  assert.match(build, /if: inputs\.release_tag != ''/)
+  assert.match(build, /gh release create .*--verify-tag/)
+  assert.match(build, /gh release view "\$RELEASE_TAG"/)
+  for (const name of ['release', 'update-claude-sdk']) {
+    const caller = readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), 'utf8')
+    assert.match(caller, /contents: write\n      packages: write/)
+  }
+})
