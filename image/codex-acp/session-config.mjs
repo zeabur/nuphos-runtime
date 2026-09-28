@@ -1,3 +1,5 @@
+import { nuphosSessionHomeEnv } from '../session-home.mjs'
+
 // Applied to thread/start and thread/resume on every ACP new/load/resume.
 // Never change process.env: concurrent conversations have different principals.
 export function nuphosCodexSessionConfig(config, meta, processEnv = process.env) {
@@ -48,7 +50,10 @@ export function nuphosCodexSessionConfig(config, meta, processEnv = process.env)
     ...config,
     developer_instructions:
       typeof context.developerInstructions === 'string' ? context.developerInstructions : '',
-    shell_environment_policy: { inherit: 'none', set: { ...baseline, ...env } },
+    shell_environment_policy: {
+      inherit: 'none',
+      set: { ...baseline, ...env, ...nuphosSessionHomeEnv(env, processEnv) },
+    },
     mcp_servers: Object.fromEntries(
       Object.entries(config.mcp_servers ?? {}).map(([name, server]) => [
         name,
