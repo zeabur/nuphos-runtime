@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { patchRuntimeDefaults } from '../runtime-defaults.mjs'
 
 export function patchAdapter(source, helper) {
+  const sessionHome = readFileSync(new URL('../session-home.mjs', import.meta.url), 'utf8')
+  helper = helper.replace("import { nuphosSessionHomeEnv } from '../session-home.mjs'", '')
   const digest = createHash('sha256').update(source).digest('hex')
   if (digest !== '7534a0ad3cc4c9affd0b2da5007fa53ea0f1d6fcd71b2c5ef202e2056a976a97')
     throw new Error(
@@ -54,7 +56,10 @@ export function patchAdapter(source, helper) {
         'var FAST_MODE_DESCRIPTION = "1.5x speed, increased usage";',
         'var FAST_MODE_DESCRIPTION = "Faster responses, increased usage";',
       )
-      .replace('// src/index.ts', `${helper}\n${steering}\n${mcpBridge}\n// src/index.ts`),
+      .replace(
+        '// src/index.ts',
+        `${sessionHome}\n${helper}\n${steering}\n${mcpBridge}\n// src/index.ts`,
+      ),
   )
 }
 

@@ -29,7 +29,9 @@ const processEnv = {
 }
 const { shell_environment_policy: policy } = nuphosCodexSessionConfig(
   {},
-  { 'ai.nuphos/codex': { env: { NUPHOS_TOKEN: 'scoped-actor' } } },
+  {
+    'ai.nuphos/codex': { env: { NUPHOS_TOKEN: 'scoped-actor', NUPHOS_SESSION_ID: 'shell-smoke' } },
+  },
   processEnv,
 )
 const overrides = [
@@ -88,7 +90,7 @@ try {
     command: [
       '/bin/sh',
       '-c',
-      'test -z "${OPENAB_ACP_AUTH_KEY+x}" && test -z "${UNSCOPED_SESSION_MARKER+x}" && test "$NUPHOS_TOKEN" = scoped-actor && test "$GOMEMLIMIT" = 6GiB && test "$NODE_OPTIONS" = --max-old-space-size=6144 && test "$GOFLAGS" = -p=2 && test "$MAKEFLAGS" = -j2 && test "$BASH_ENV" = /opt/nuphos-runtime/runtime-guard.sh && test -n "$HOME" && command -v sh >/dev/null',
+      'test -z "${OPENAB_ACP_AUTH_KEY+x}" && test -z "${UNSCOPED_SESSION_MARKER+x}" && test "$NUPHOS_TOKEN" = scoped-actor && test "$GOMEMLIMIT" = 6GiB && test "$NODE_OPTIONS" = --max-old-space-size=6144 && test "$GOFLAGS" = -p=2 && test "$MAKEFLAGS" = -j2 && test "$BASH_ENV" = /opt/nuphos-runtime/runtime-guard.sh && test "$HOME" = "$NUPHOS_SESSION_HOME" && test "$GH_CONFIG_DIR" = "$HOME/.config/gh" && test "$CLOUDSDK_CONFIG" = "$HOME/.config/gcloud" && command -v sh >/dev/null',
     ],
     cwd: base,
     sandboxPolicy: { type: 'dangerFullAccess' },

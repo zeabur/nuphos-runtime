@@ -4,10 +4,14 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 
 import { patchAdapter } from '../image/codex-acp/patch-adapter.mjs'
 import { nuphosCodexSessionConfig } from '../image/codex-acp/session-config.mjs'
+
+const runtimeHome = mkdtempSync(join(tmpdir(), 'nuphos-runtime-env-'))
+const runtimeEnv = { HOME: runtimeHome, PATH: process.env.PATH }
+after(() => rmSync(runtimeHome, { recursive: true, force: true }))
 
 const config = {
   mcp_servers: {
@@ -27,21 +31,36 @@ function nodeHeapLimit(args, env) {
 }
 
 test('Codex new/resume context keeps instructions, MCP, and shell credentials scoped to each actor', () => {
-  const actorA = nuphosCodexSessionConfig(config, {
-    'ai.nuphos/codex': {
-      developerInstructions: 'context A',
-      env: {
-        NUPHOS_TOKEN: 'actor-a',
-        NUPHOS_PLAN_API_TOKEN: 'actor-a',
-        OPENAB_ACP_AUTH_KEY: 'blocked',
+  const actorA = nuphosCodexSessionConfig(
+    config,
+    {
+      'ai.nuphos/codex': {
+        developerInstructions: 'context A',
+        env: {
+          NUPHOS_TOKEN: 'actor-a',
+          NUPHOS_SESSION_ID: 'session-a',
+          NUPHOS_PLAN_API_TOKEN: 'actor-a',
+          OPENAB_ACP_AUTH_KEY: 'blocked',
+        },
       },
     },
-  })
+    runtimeEnv,
+  )
   const actorB = nuphosCodexSessionConfig(
     { ...config, mcp_servers: {} },
-    { 'ai.nuphos/codex': { developerInstructions: 'context B', env: { NUPHOS_TOKEN: 'actor-b' } } },
+    {
+      'ai.nuphos/codex': {
+        developerInstructions: 'context B',
+        env: { NUPHOS_TOKEN: 'actor-b', NUPHOS_SESSION_ID: 'session-b' },
+      },
+    },
+    runtimeEnv,
   )
 
+  assert.notEqual(
+    actorA.shell_environment_policy.set.HOME,
+    actorB.shell_environment_policy.set.HOME,
+  )
   assert.equal(actorA.developer_instructions, 'context A')
   assert.equal(actorA.shell_environment_policy.set.NUPHOS_PLAN_API_TOKEN, 'actor-a')
   assert.equal(actorA.shell_environment_policy.set.OPENAB_ACP_AUTH_KEY, undefined)
@@ -60,19 +79,21 @@ test('Codex new/resume context keeps instructions, MCP, and shell credentials sc
 test('Codex shell inherits only baseline variables and explicitly scoped credentials', () => {
   const result = nuphosCodexSessionConfig(
     {},
-    { 'ai.nuphos/codex': { env: { NUPHOS_TOKEN: 'scoped' } } },
+    { 'ai.nuphos/codex': { env: { NUPHOS_TOKEN: 'scoped', NUPHOS_SESSION_ID: 'scoped-session' } } },
     {
       PATH: '/usr/bin:/bin',
-      HOME: '/home/node',
+      HOME: runtimeHome,
       OPENAB_ACP_AUTH_KEY: 'pod-wide',
       NUPHOS_TOKEN: 'stale',
     },
   )
 
-  assert.deepEqual(result.shell_environment_policy, {
-    inherit: 'none',
-    set: { PATH: '/usr/bin:/bin', HOME: '/home/node', NUPHOS_TOKEN: 'scoped' },
-  })
+  assert.equal(result.shell_environment_policy.inherit, 'none')
+  const env = result.shell_environment_policy.set
+  assert.notEqual(env.HOME, runtimeHome)
+  assert.equal(env.NUPHOS_TOKEN, 'scoped')
+  assert.equal(env.OPENAB_ACP_AUTH_KEY, undefined)
+  assert.ok(env.PATH.endsWith('/usr/bin:/bin'))
 })
 
 test('adapter upgrades fail closed until the pinned patch is reviewed', () => {

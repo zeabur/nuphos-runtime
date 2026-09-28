@@ -286,6 +286,24 @@ filesystem (an agent working for one team can read and change files another team
 agent wrote), one provider sign-in and account, and the same installed tools. Connect
 it only to teams that may share them.
 
+Nuphos conversations have separate CLI homes under
+`~/.nuphos/session-homes/<sha256-conversation-id>`. Both adapters give shell tools
+that conversation's `HOME`, XDG directories, and explicit config paths for gcloud,
+gh, AWS, Kubernetes, Azure, Docker, Git, npm and GPG. The home persists across
+new/load/resume and token refresh; existing runtime-global credentials are never
+copied into it. Re-run credential setup inside the conversation after upgrading.
+The agent provider's own login remains runtime-owned so this does not require a
+new Claude/Codex login. Desktop bundles use the same adapter behavior.
+
+This prevents accidental configuration collisions, not access by another process
+running as the same OS user. Shared workspaces, installed tools, provider settings
+and OS credential stores remain shared. Skills should respect the session paths;
+in particular, GitHub installation tokens must be stored in the session's gh
+config directly, not through `gh auth login` (even `--insecure-storage` can touch a shared OS keychain). Changing runtime-global
+settings is possible but strongly discouraged unless the user understands the
+impact on other sessions and explicitly requests that scope. Use separate runtimes
+when a filesystem security boundary is required.
+
 Everything else a Nuphos-provisioned pod has always had is already in the image,
 so the agent reaches Nuphos' own tools as soon as it is connected — the container
 only has to be able to resolve and reach the backend they are served from. The

@@ -42,7 +42,7 @@ jobs:
           npm ci --ignore-scripts --prefix image/claude-agent-acp
           node image/claude-agent-acp/patch-adapter.mjs image/claude-agent-acp/node_modules/@agentclientprotocol/claude-agent-acp/dist/acp-agent.js
           node --check image/claude-agent-acp/node_modules/@agentclientprotocol/claude-agent-acp/dist/acp-agent.js
-          node --test test/claude-turn-completion-smoke.mjs test/claude-session-state-smoke.mjs
+          node --test test/claude-turn-completion-smoke.mjs test/claude-session-state-smoke.mjs test/claude-session-home-smoke.mjs
       - name: Set up Buildx
         if: steps.update.outputs.changed == 'true'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0

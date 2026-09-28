@@ -15,9 +15,7 @@ const source = process.argv[2]
 if (!source)
   throw new Error('Usage: node test/codex-acp-smoke.mjs <unpatched codex-acp dist/index.js>')
 const fromAdapter = createRequire(resolve(source))
-const fromRuntime = createRequire(
-  new URL('../image/codex-acp/package.json', import.meta.url),
-)
+const fromRuntime = createRequire(new URL('../image/codex-acp/package.json', import.meta.url))
 
 assert.equal(
   fromAdapter.resolve('@openai/codex/bin/codex.js'),
@@ -95,7 +93,7 @@ try {
     _meta: {
       'ai.nuphos/codex': {
         developerInstructions: `context ${actor}`,
-        env: { NUPHOS_TOKEN: actor },
+        env: { NUPHOS_TOKEN: actor, NUPHOS_SESSION_ID: 'conversation-smoke' },
       },
     },
   })
@@ -132,6 +130,11 @@ try {
   const start = calls.find((c) => c.method === 'thread/start')
   const resume = calls.find((c) => c.method === 'thread/resume')
 
+  assert.notEqual(start.params.config.shell_environment_policy.set.HOME, base)
+  assert.equal(
+    start.params.config.shell_environment_policy.set.HOME,
+    resume.params.config.shell_environment_policy.set.HOME,
+  )
   assert.equal(start.params.config.developer_instructions, 'context actor-a')
   assert.equal(start.params.config.shell_environment_policy.set.NUPHOS_TOKEN, 'actor-a')
   assert.equal(resume.params.config.developer_instructions, 'context actor-b')
