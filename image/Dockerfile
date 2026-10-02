@@ -118,6 +118,7 @@ ENV OPENAB_BUILD_SHA="${OPENAB_BUILD_SHA}" \
 # keeps its state beside the tools on the home volume. Override with
 # OPENAB_RUNTIME_CONSOLE=false and a password in OPENAB_ACP_AUTH_KEY.
 ENV OPENAB_ACP_ENABLED=true \
+    OPENAB_RUNTIME_TERMINAL_CWD=/workspace \
     OPENAB_ACP_MCP_SERVERS=true \
     OPENAB_ACP_STREAMING=true \
     GATEWAY_ALLOWED_USERS=acp_client \
